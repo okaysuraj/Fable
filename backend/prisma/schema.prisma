@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model User {
+  id          String     @id
+  name        String
+  handle      String     @unique
+  monogram    String
+  role        String
+  status      String     @default("online")
+  statusText  String?
+  avatarColor String?
+  account     Account?
+  messages    Message[]
+  reactions   Reaction[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Channel {
+  id          String     @id
+  name        String
+  topic       String
+  type        String     @default("text") // 'text' | 'audio' | 'video'
+  unreadCount Int        @default(0)
+  isPrivate   Boolean    @default(false)
+  memberCount Int        @default(1)
+  activeCall  Json?
+  messages    Message[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Message {
+  id          String     @id
+  channelId   String
+  channel     Channel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  senderId    String
+  sender      User       @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  timestamp   String
+  content     String
+  codeSnippet Json?
+  voiceNote   Json?
+  attachments Json?
+  isPinned    Boolean    @default(false)
+  reactions   Reaction[]
+  createdAt   DateTime   @default(now())
+}
+
+model Reaction {
+  id        String   @id @default(cuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  icon      String
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId, icon])
+}
+
+model WorkspaceSetting {
+  id                String   @id @default("default_settings")
+  micDeviceId       String   @default("default")
+  cameraDeviceId    String   @default("default")
+  speakerDeviceId   String   @default("default")
+  noiseCancellation Boolean  @default(true)
+  spatialAudio      Boolean  @default(true)
+  theme             String   @default("dark")
+  inputVolume       Int      @default(85)
+  outputVolume      Int      @default(90)
+  updatedAt         DateTime @updatedAt
+}
