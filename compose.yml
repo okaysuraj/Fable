@@ -1,6 +1,7 @@
 # PostgreSQL is the only container. Start the API and web app manually with npm.
 services:
   postgres:
+    container_name: fable_postgres
     image: postgres:16-alpine
     restart: unless-stopped
     ports:
@@ -20,4 +21,3 @@ services:
 
 volumes:
   postgres_data:
-    name: fable_postgres_data
