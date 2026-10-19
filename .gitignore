@@ -7,14 +7,15 @@ node_modules/
 dist/
 build/
 .expo/
+web-build/
+*.tsbuildinfo
+expo-env.d.ts
 
 
 # Environment files
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
 
 # Logs
 npm-debug.log*
@@ -27,3 +28,24 @@ yarn-error.log*
 Thumbs.db
 .vscode/
 .idea/
+.audit-tools/
+playwright-report/
+test-results/
+audit-dependencies.json
+.audit-export-final/
+.audit-export/
+firebase-debug.log
+*-debug.log
+
+# Generated native projects and signing material
+mobile/ios/
+mobile/android/
+.kotlin/
+.metro-health-check*
+*.jks
+*.p8
+*.p12
+*.key
+*.pem
+*.mobileprovision
+*.orig.*

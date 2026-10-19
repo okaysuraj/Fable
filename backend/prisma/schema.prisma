@@ -8,58 +8,145 @@ datasource db {
 }
 
 model Account {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  email       String   @unique
+  firebaseUid String?  @unique
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
 }
 
 model User {
-  id          String     @id
+  id              String            @id @default(cuid())
+  name            String
+  handle          String            @unique
+  monogram        String
+  role            String            @default("Member")
+  status          String            @default("offline")
+  statusText      String?
+  avatarColor     String?
+  lastSeenAt      DateTime?         @db.Timestamptz(3)
+  account         Account?
+  messages        Message[]
+  reactions       Reaction[]
+  memberships     WorkspaceMember[]
+  channels        ChannelMember[]
+  createdChannels Channel[]         @relation("ChannelCreator")
+  auditEvents     AuditEvent[]
+  settings        WorkspaceSetting?
+  createdAt       DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime          @updatedAt @db.Timestamptz(3)
+}
+
+model Workspace {
+  id          String            @id @default(cuid())
   name        String
-  handle      String     @unique
-  monogram    String
-  role        String
-  status      String     @default("online")
-  statusText  String?
-  avatarColor String?
-  account     Account?
-  messages    Message[]
-  reactions   Reaction[]
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  members     WorkspaceMember[]
+  channels    Channel[]
+  invitations Invitation[]
+  auditEvents AuditEvent[]
+  createdAt   DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime          @updatedAt @db.Timestamptz(3)
+}
+
+model WorkspaceMember {
+  workspaceId String
+  userId      String
+  role        String    @default("member")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@id([workspaceId, userId])
+  @@index([userId, createdAt, workspaceId])
+  @@index([workspaceId, createdAt, userId])
 }
 
 model Channel {
-  id          String     @id
+  id          String          @id @default(cuid())
+  workspaceId String
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   name        String
-  topic       String
-  type        String     @default("text") // 'text' | 'audio' | 'video'
-  unreadCount Int        @default(0)
-  isPrivate   Boolean    @default(false)
-  memberCount Int        @default(1)
-  activeCall  Json?
+  topic       String          @default("")
+  type        String          @default("text")
+  isPrivate   Boolean         @default(false)
+  createdById String?
+  createdBy   User?           @relation("ChannelCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  members     ChannelMember[]
   messages    Message[]
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  changes     MessageChange[]
+  createdAt   DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime        @updatedAt @db.Timestamptz(3)
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, createdAt, id])
+}
+
+model ChannelMember {
+  channelId         String
+  userId            String
+  channel           Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastReadAt        DateTime @default(now()) @db.Timestamptz(3)
+  lastReadMessageId String?
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+
+  @@id([channelId, userId])
+  @@index([userId])
+  @@index([channelId, createdAt, userId])
 }
 
 model Message {
-  id          String     @id
+  id          String          @id @default(cuid())
   channelId   String
-  channel     Channel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  channel     Channel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
   senderId    String
-  sender      User       @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  timestamp   String
+  sender      User            @relation(fields: [senderId], references: [id], onDelete: Restrict)
   content     String
+  clientMutationId   String?
+  clientMutationHash String?
   codeSnippet Json?
   voiceNote   Json?
   attachments Json?
-  isPinned    Boolean    @default(false)
+  isPinned    Boolean         @default(false)
   reactions   Reaction[]
-  createdAt   DateTime   @default(now())
+  changes     MessageChange[]
+  version     Int             @default(1)
+  updatedAt   DateTime        @updatedAt @db.Timestamptz(3)
+  editedAt    DateTime?       @db.Timestamptz(3)
+  deletedAt   DateTime?       @db.Timestamptz(3)
+  createdAt   DateTime        @default(now()) @db.Timestamptz(3)
+
+  @@index([channelId, createdAt, id])
+  @@index([senderId])
+  @@index([channelId, isPinned, createdAt, id])
+  @@unique([channelId, senderId, clientMutationId])
+}
+
+model MessageChange {
+  sequence  BigInt   @id @default(autoincrement())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([channelId, sequence])
+  @@index([messageId])
+}
+
+model AuditEvent {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actorId     String?
+  actor       User?     @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action      String
+  targetId    String
+  metadata    Json?
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([workspaceId, createdAt, id])
 }
 
 model Reaction {
@@ -69,13 +156,30 @@ model Reaction {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   icon      String
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
 
   @@unique([messageId, userId, icon])
+  @@index([userId])
+}
+
+model Invitation {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  email       String
+  tokenHash   String    @unique
+  expiresAt   DateTime  @db.Timestamptz(3)
+  acceptedAt  DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([workspaceId, email])
+  @@index([workspaceId, createdAt, id])
 }
 
 model WorkspaceSetting {
-  id                String   @id @default("default_settings")
+  id                String   @id @default(cuid())
+  userId            String?  @unique
+  user              User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   micDeviceId       String   @default("default")
   cameraDeviceId    String   @default("default")
   speakerDeviceId   String   @default("default")
@@ -84,5 +188,13 @@ model WorkspaceSetting {
   theme             String   @default("dark")
   inputVolume       Int      @default(85)
   outputVolume      Int      @default(90)
-  updatedAt         DateTime @updatedAt
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
+}
+
+// Archived pre-migration display metadata has no public API. Review before importing.
+model LegacyArchive {
+  id        String   @id
+  kind      String
+  payload   Json
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
 }

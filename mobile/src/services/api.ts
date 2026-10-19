@@ -1,363 +1,438 @@
-import Constants from 'expo-constants';
-import { Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
+/** Feature endpoints share session-aware transport; screens do not construct API requests. */
+import type {
   Channel,
+  ChannelMember,
   Message,
   User,
   WorkspaceSettings,
-  VoiceNoteData,
-} from '@/types';
+} from "@/types/chat";
 import {
-  INITIAL_CHANNELS,
-  INITIAL_MESSAGES,
-  TEAM_MEMBERS,
-  CURRENT_USER,
-  DEFAULT_SETTINGS,
-} from '@/data/mockData';
+  request,
+  session,
+  selectWorkspace,
+  getSelectedWorkspaceId,
+} from "./session";
+export { ApiError } from "./request";
+export {
+  authError,
+  getSessionToken,
+  onSessionExpired,
+  getApiBaseUrl,
+} from "./session";
+export type { AuthResponse, RegistrationResponse } from "./session";
 
-const TOKEN_KEY = 'fable_token';
-let cachedToken: string | null = null;
-
-// Initialize cached token on import
-AsyncStorage.getItem(TOKEN_KEY).then((t) => {
-  cachedToken = t;
-});
-
-export async function getStoredToken(): Promise<string | null> {
-  if (cachedToken) return cachedToken;
-  cachedToken = await AsyncStorage.getItem(TOKEN_KEY);
-  return cachedToken;
+export interface Workspace {
+  id: string;
+  name: string;
+  role: string;
 }
-
-export async function setStoredToken(token: string | null): Promise<void> {
-  cachedToken = token;
-  if (token) {
-    await AsyncStorage.setItem(TOKEN_KEY, token);
-  } else {
-    await AsyncStorage.removeItem(TOKEN_KEY);
-  }
+export interface MessagePage {
+  data: Message[];
+  hasMore: boolean;
+  nextCursor: string | null;
+  changeCursor: string;
+  hasOlder: boolean;
+  hasNewer: boolean;
+  olderCursor: string | null;
+  newerCursor: string | null;
 }
-
-/**
- * Resolves the backend base URL dynamically:
- * - Physical device (Expo Go): extracts host IP from expo-constants
- * - Android Emulator: 10.0.2.2:5000
- * - iOS Simulator / Web: localhost:5000
- */
-export function getApiBaseUrl(): string {
-  if (process.env.EXPO_PUBLIC_API_URL) {
-    return process.env.EXPO_PUBLIC_API_URL;
-  }
-
-  // On physical device with Expo Go, hostUri contains "192.168.x.x:8081"
-  const hostUri = Constants.expoConfig?.hostUri;
-  if (hostUri) {
-    const ip = hostUri.split(':')[0];
-    return `http://${ip}:5000/api`;
-  }
-
-  // Fallbacks for local emulators/simulators
-  if (Platform.OS === 'android') {
-    return 'http://10.0.2.2:5000/api';
-  }
-
-  return 'http://localhost:5000/api';
+export interface MessageChanges {
+  data: Message[];
+  hasMore: boolean;
+  changeCursor: string;
 }
-
-function getAuthHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (cachedToken) {
-    headers['Authorization'] = `Bearer ${cachedToken}`;
-  }
-  return headers;
+export interface DirectoryPage<T> {
+  data: T[];
+  total?: number;
+  hasMore: boolean;
+  nextCursor: string | null;
 }
-
-export interface HealthResponse {
-  status: string;
-  service: string;
-  version: string;
-  uptime: number;
-  timestamp: string;
+export interface WorkspaceInvitation {
+  id: string;
+  email: string;
+  expiresAt: string;
+  acceptedAt: string | null;
+  createdAt: string;
+  status: "pending" | "expired" | "accepted";
 }
-
-export interface AuthResponse {
-  token: string;
-  user: User;
+export interface MessageSearchResult {
+  message: Message;
+  channel: { id: string; name: string };
+}
+export interface WorkspaceAuditEvent {
+  id: string;
+  actorId: string;
+  action: string;
+  targetId: string | null;
+  createdAt: string;
+}
+export interface ChannelMembers extends DirectoryPage<ChannelMember> {
+  canManageMembers: boolean;
+}
+export interface DirectoryOptions {
+  after?: string;
+  q?: string;
+  limit?: number;
+  signal?: AbortSignal;
+}
+export interface PageOptions {
+  before?: string;
+  after?: string;
+  around?: string;
+  limit?: number;
+  signal?: AbortSignal;
+}
+function directoryQuery(options: DirectoryOptions = {}) {
+  const query = new URLSearchParams({ limit: String(options.limit ?? 50) });
+  if (options.after) query.set("after", options.after);
+  if (options.q?.trim()) query.set("q", options.q.trim());
+  return query;
 }
 
 export const api = {
-  // ─── AUTH ─────────────────────────────────
-  async register(email: string, password: string, name: string): Promise<AuthResponse> {
-    try {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, name }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Registration failed');
-      }
-      const data: AuthResponse = await res.json();
-      await setStoredToken(data.token);
-      return data;
-    } catch (err: any) {
-      // In offline/mock fallback mode
-      if (err.message?.includes('failed') || err.message?.includes('Network')) {
-        const mockUser: User = {
-          ...CURRENT_USER,
-          name: name || 'Studio Designer',
-          handle: `@${(name || 'designer').toLowerCase().replace(/\s+/g, '')}`,
-        };
-        const mockToken = 'mock_jwt_token_demo';
-        await setStoredToken(mockToken);
-        return { token: mockToken, user: mockUser };
-      }
-      throw err;
-    }
+  ...session,
+  selectWorkspace,
+  getSelectedWorkspaceId,
+  fetchWorkspaces: (options: DirectoryOptions = {}) =>
+    request<DirectoryPage<Workspace> & { currentWorkspaceId: string | null }>(
+      `/workspace?${directoryQuery(options)}`,
+      { signal: options.signal },
+    ),
+  async fetchWorkspace(
+    id: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<Workspace> {
+    return (
+      await request<{ data: Workspace }>(
+        `/workspace/${encodeURIComponent(id)}`,
+        { signal: options.signal },
+      )
+    ).data;
   },
-
-  async login(email: string, password: string): Promise<AuthResponse> {
-    try {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Login failed');
-      }
-      const data: AuthResponse = await res.json();
-      await setStoredToken(data.token);
-      return data;
-    } catch (err: any) {
-      // Fallback for demo credentials or offline mode
-      if (
-        (email === 'suraj@fable.studio' && password === 'password123') ||
-        err.message?.includes('Network') ||
-        err.message?.includes('failed')
-      ) {
-        const mockToken = 'mock_jwt_token_demo';
-        await setStoredToken(mockToken);
-        return { token: mockToken, user: CURRENT_USER };
-      }
-      throw err;
-    }
+  async createWorkspace(name: string): Promise<Workspace> {
+    return (
+      await request<{ data: Workspace }>("/workspace", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      })
+    ).data;
   },
-
-  async fetchMe(): Promise<{ user: User }> {
-    try {
-      await getStoredToken();
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/auth/me`, {
-        headers: getAuthHeaders(),
-      });
-      if (!res.ok) throw new Error('Not authenticated');
-      return res.json();
-    } catch {
-      if (cachedToken) {
-        return { user: CURRENT_USER };
-      }
-      throw new Error('Not authenticated');
-    }
+  async renameWorkspace(id: string, name: string): Promise<Workspace> {
+    return (
+      await request<{ data: Workspace }>(
+        `/workspace/${encodeURIComponent(id)}`,
+        { method: "PATCH", body: JSON.stringify({ name }) },
+      )
+    ).data;
   },
-
-  async logout(): Promise<void> {
-    await setStoredToken(null);
+  updateWorkspaceMember: (
+    id: string,
+    userId: string,
+    role: "admin" | "member",
+  ) =>
+    request(
+      `/workspace/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`,
+      { method: "PATCH", body: JSON.stringify({ role }) },
+    ),
+  removeWorkspaceMember: (id: string, userId: string) =>
+    request<void>(
+      `/workspace/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" },
+    ),
+  async transferWorkspaceOwnership(
+    id: string,
+    userId: string,
+  ): Promise<Workspace> {
+    return (
+      await request<{ data: Workspace }>(
+        `/workspace/${encodeURIComponent(id)}/transfer-ownership`,
+        { method: "POST", body: JSON.stringify({ userId }) },
+      )
+    ).data;
   },
-
-  // ─── HEALTH ───────────────────────────────
-  async checkHealth(): Promise<HealthResponse> {
-    const baseUrl = getApiBaseUrl();
-    const res = await fetch(`${baseUrl}/health`);
-    if (!res.ok) {
-      throw new Error(`Health check failed: ${res.statusText}`);
-    }
-    return res.json();
+  leaveWorkspace: (id: string) =>
+    request<void>(`/workspace/${encodeURIComponent(id)}/leave`, {
+      method: "POST",
+      body: "{}",
+    }),
+  fetchInvitations: (options: DirectoryOptions = {}) =>
+    request<DirectoryPage<WorkspaceInvitation>>(
+      `/workspace/invitations?${directoryQuery(options)}`,
+      { signal: options.signal },
+    ),
+  revokeInvitation: (id: string) =>
+    request<void>(`/workspace/invitations/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  fetchWorkspaceAudit: (options: DirectoryOptions = {}) => {
+    const query = new URLSearchParams({ limit: String(options.limit ?? 50) });
+    if (options.after) query.set("before", options.after);
+    return request<DirectoryPage<WorkspaceAuditEvent>>(
+      `/workspace/audit?${query}`,
+      { signal: options.signal },
+    );
   },
-
-  // ─── CHANNELS ─────────────────────────────
-  async fetchChannels(): Promise<Channel[]> {
-    try {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/channels`, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error(`Failed to fetch channels`);
-      const json = await res.json();
-      return json.data || INITIAL_CHANNELS;
-    } catch {
-      return INITIAL_CHANNELS;
-    }
+  invite: (email: string) =>
+    request<{ data: { token: string; email: string; expiresAt: string } }>(
+      "/workspace/invitations",
+      { method: "POST", body: JSON.stringify({ email }) },
+    ),
+  joinWorkspace: (token: string) =>
+    request<{ data: { workspaceId: string } }>("/workspace/join", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+  fetchChannelDirectory: (options: DirectoryOptions = {}) =>
+    request<DirectoryPage<Channel>>(`/channels?${directoryQuery(options)}`, {
+      signal: options.signal,
+    }),
+  async fetchChannels(options: DirectoryOptions = {}): Promise<Channel[]> {
+    return (await api.fetchChannelDirectory(options)).data;
   },
-
-  async fetchChannel(id: string): Promise<Channel> {
-    try {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/channels/${id}`, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error(`Failed to fetch channel`);
-      const json = await res.json();
-      return json.data;
-    } catch {
-      const found = INITIAL_CHANNELS.find((c) => c.id === id);
-      if (!found) throw new Error('Channel not found');
-      return found;
-    }
+  async fetchChannel(
+    id: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<Channel> {
+    return (
+      await request<{ data: Channel }>(`/channels/${encodeURIComponent(id)}`, {
+        signal: options.signal,
+      })
+    ).data;
   },
-
-  // ─── MESSAGES ─────────────────────────────
-  async fetchAllMessages(): Promise<Record<string, Message[]>> {
-    try {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/messages`, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error(`Failed to fetch messages`);
-      const json = await res.json();
-      return json.data || INITIAL_MESSAGES;
-    } catch {
-      return INITIAL_MESSAGES;
-    }
+  markChannelRead: (
+    id: string,
+    messageId?: string,
+    options: { signal?: AbortSignal } = {},
+  ) =>
+    request<void>(`/channels/${encodeURIComponent(id)}/read`, {
+      method: "POST",
+      body: JSON.stringify({ ...(messageId ? { messageId } : {}) }),
+      signal: options.signal,
+    }),
+  async createChannel(values: {
+    name: string;
+    topic?: string;
+    type?: "text" | "audio" | "video";
+    isPrivate?: boolean;
+  }): Promise<Channel> {
+    return (
+      await request<{ data: Channel }>("/channels", {
+        method: "POST",
+        body: JSON.stringify(values),
+      })
+    ).data;
   },
-
-  async fetchMessages(channelId: string): Promise<Message[]> {
-    try {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/messages/${channelId}`, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error(`Failed to fetch messages`);
-      const json = await res.json();
-      return json.data;
-    } catch {
-      return INITIAL_MESSAGES[channelId] || [];
-    }
+  async updateChannel(
+    id: string,
+    values: { name: string; topic: string },
+  ): Promise<Channel> {
+    return (
+      await request<{ data: Channel }>(`/channels/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(values),
+      })
+    ).data;
   },
-
+  async transferChannelOwnership(id: string, userId: string): Promise<Channel> {
+    return (
+      await request<{ data: Channel }>(
+        `/channels/${encodeURIComponent(id)}/transfer-ownership`,
+        { method: "POST", body: JSON.stringify({ userId }) },
+      )
+    ).data;
+  },
+  deleteChannel: (id: string, confirmName: string) =>
+    request<void>(`/channels/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ confirmName }),
+    }),
+  searchMessages: (options: DirectoryOptions & { channelId?: string } = {}) => {
+    const query = directoryQuery(options);
+    if (options.channelId) query.set("channelId", options.channelId);
+    return request<DirectoryPage<MessageSearchResult>>(
+      `/messages/search?${query}`,
+      { signal: options.signal },
+    );
+  },
+  async fetchMessagePage(
+    channelId: string,
+    options: PageOptions = {},
+  ): Promise<MessagePage> {
+    const query = new URLSearchParams({ limit: String(options.limit ?? 50) });
+    if (options.before) query.set("before", options.before);
+    if (options.after) query.set("after", options.after);
+    if (options.around) query.set("around", options.around);
+    return request<MessagePage>(
+      `/messages/${encodeURIComponent(channelId)}?${query}`,
+      { signal: options.signal },
+    );
+  },
+  fetchMessageChanges(
+    channelId: string,
+    after: string,
+    options: { limit?: number; signal?: AbortSignal } = {},
+  ): Promise<MessageChanges> {
+    const query = new URLSearchParams({
+      after,
+      limit: String(options.limit ?? 100),
+    });
+    return request<MessageChanges>(
+      `/messages/${encodeURIComponent(channelId)}/changes?${query}`,
+      { signal: options.signal },
+    );
+  },
+  fetchPinnedMessages(
+    channelId: string,
+    options: PageOptions = {},
+  ): Promise<MessagePage> {
+    const query = new URLSearchParams({ limit: String(options.limit ?? 50) });
+    if (options.before) query.set("before", options.before);
+    if (options.after) query.set("after", options.after);
+    return request<MessagePage>(
+      `/channels/${encodeURIComponent(channelId)}/pins?${query}`,
+      { signal: options.signal },
+    );
+  },
+  fetchChannelMembers(
+    channelId: string,
+    options: DirectoryOptions = {},
+  ): Promise<ChannelMembers> {
+    return request<ChannelMembers>(
+      `/channels/${encodeURIComponent(channelId)}/members?${directoryQuery(options)}`,
+      { signal: options.signal },
+    );
+  },
+  fetchChannelCandidates(
+    channelId: string,
+    options: DirectoryOptions = {},
+  ): Promise<DirectoryPage<User>> {
+    return request<DirectoryPage<User>>(
+      `/channels/${encodeURIComponent(channelId)}/member-candidates?${directoryQuery(options)}`,
+      { signal: options.signal },
+    );
+  },
+  async addChannelMember(channelId: string, userId: string): Promise<void> {
+    await request(`/channels/${encodeURIComponent(channelId)}/members`, {
+      method: "POST",
+      body: JSON.stringify({ userId }),
+    });
+  },
+  removeChannelMember(channelId: string, userId: string): Promise<void> {
+    return request<void>(
+      `/channels/${encodeURIComponent(channelId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" },
+    );
+  },
+  async editMessage(
+    id: string,
+    values: { content: string; expectedVersion: number },
+  ): Promise<Message> {
+    return (
+      await request<{ data: Message }>(`/messages/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(values),
+      })
+    ).data;
+  },
+  async deleteMessage(id: string, expectedVersion: number): Promise<Message> {
+    return (
+      await request<{ data: Message }>(`/messages/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        body: JSON.stringify({ expectedVersion }),
+      })
+    ).data;
+  },
+  async pinMessage(
+    id: string,
+    isPinned: boolean,
+    expectedVersion: number,
+  ): Promise<Message> {
+    return (
+      await request<{ data: Message }>(
+        `/messages/${encodeURIComponent(id)}/pin`,
+        { method: "PUT", body: JSON.stringify({ isPinned, expectedVersion }) },
+      )
+    ).data;
+  },
+  async updateProfile(values: {
+    name?: string;
+    statusText?: string;
+  }): Promise<User> {
+    return (
+      await request<{ user: User }>("/auth/profile", {
+        method: "PATCH",
+        body: JSON.stringify(values),
+      })
+    ).user;
+  },
   async sendMessage(
     channelId: string,
     content: string,
-    voiceNote?: VoiceNoteData,
-    codeSnippet?: { language: string; code: string }
+    options: {
+      codeSnippet?: Message["codeSnippet"];
+      clientMutationId?: string;
+    } = {},
   ): Promise<Message> {
-    try {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/messages`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
+    return (
+      await request<{ data: Message }>("/messages", {
+        method: "POST",
         body: JSON.stringify({
           channelId,
           content,
-          voiceNote,
-          codeSnippet,
+          ...options,
         }),
-      });
-
-      if (!res.ok) {
-        throw new Error(`Failed to send message: ${res.statusText}`);
-      }
-      const json = await res.json();
-      return json.data;
-    } catch {
-      const now = new Date();
-      const hours = now.getHours();
-      const minutes = now.getMinutes();
-      const ampm = hours >= 12 ? 'PM' : 'AM';
-      const formattedHours = hours % 12 || 12;
-      const formattedMinutes = minutes < 10 ? `0${minutes}` : minutes;
-      const timestamp = `${formattedHours}:${formattedMinutes} ${ampm}`;
-
-      return {
-        id: `msg_local_${Date.now()}`,
-        channelId,
-        sender: CURRENT_USER,
-        timestamp,
-        content,
-        voiceNote,
-        codeSnippet,
-        reactions: [],
-      };
-    }
+      })
+    ).data;
   },
-
   async toggleReaction(messageId: string, icon: string): Promise<Message> {
-    try {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/messages/${messageId}/reactions`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ icon }),
-      });
-
-      if (!res.ok) {
-        throw new Error(`Failed to toggle reaction`);
-      }
-      const json = await res.json();
-      return json.data;
-    } catch {
-      // Mock toggle
-      return {
-        id: messageId,
-        channelId: '',
-        sender: CURRENT_USER,
-        timestamp: 'Just now',
-        content: '',
-      };
-    }
+    return (
+      await request<{ data: Message }>(
+        `/messages/${encodeURIComponent(messageId)}/reactions`,
+        { method: "POST", body: JSON.stringify({ icon }) },
+      )
+    ).data;
   },
-
-  // ─── TEAM ─────────────────────────────────
-  async fetchTeamMembers(): Promise<User[]> {
-    try {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/team/members`, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error(`Failed to fetch team members`);
-      const json = await res.json();
-      return json.data || TEAM_MEMBERS;
-    } catch {
-      return TEAM_MEMBERS;
-    }
+  fetchTeamDirectory: (options: DirectoryOptions = {}) =>
+    request<DirectoryPage<User>>(`/team/members?${directoryQuery(options)}`, {
+      signal: options.signal,
+    }),
+  async fetchProfiles(
+    userIds: string[],
+    options: { signal?: AbortSignal } = {},
+  ): Promise<User[]> {
+    return (
+      await request<{ data: User[] }>("/team/profiles", {
+        method: "POST",
+        body: JSON.stringify({ userIds }),
+        signal: options.signal,
+      })
+    ).data;
   },
-
-  async fetchCurrentUser(): Promise<User> {
-    try {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/team/me`, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error(`Failed to fetch current user`);
-      const json = await res.json();
-      return json.data || CURRENT_USER;
-    } catch {
-      return CURRENT_USER;
-    }
+  async fetchTeamMembers(options: DirectoryOptions = {}): Promise<User[]> {
+    return (await api.fetchTeamDirectory(options)).data;
   },
-
-  // ─── SETTINGS ─────────────────────────────
-  async fetchSettings(): Promise<WorkspaceSettings> {
-    try {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/settings`, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error(`Failed to fetch settings`);
-      const json = await res.json();
-      return json.data || DEFAULT_SETTINGS;
-    } catch {
-      return DEFAULT_SETTINGS;
-    }
+  async fetchCurrentUser(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<User> {
+    return (await api.fetchMe(options)).user;
   },
-
-  async updateSettings(settings: Partial<WorkspaceSettings>): Promise<WorkspaceSettings> {
-    try {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/settings`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
+  async fetchSettings(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<WorkspaceSettings> {
+    return (
+      await request<{ data: WorkspaceSettings }>("/settings", {
+        signal: options.signal,
+      })
+    ).data;
+  },
+  async updateSettings(
+    settings: Partial<WorkspaceSettings>,
+  ): Promise<WorkspaceSettings> {
+    return (
+      await request<{ data: WorkspaceSettings }>("/settings", {
+        method: "PUT",
         body: JSON.stringify(settings),
-      });
-
-      if (!res.ok) throw new Error(`Failed to update settings`);
-      const json = await res.json();
-      return json.data;
-    } catch {
-      return { ...DEFAULT_SETTINGS, ...settings };
-    }
+      })
+    ).data;
   },
 };

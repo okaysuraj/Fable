@@ -1,4 +1,5 @@
-export type UserStatus = 'online' | 'idle' | 'in-huddle' | 'offline';
+/** Native client DTOs follow the same text collaboration records and permissions as web. */
+export type UserStatus = "online" | "idle" | "in-huddle" | "offline";
 
 export interface User {
   id: string;
@@ -6,12 +7,13 @@ export interface User {
   handle: string;
   monogram: string;
   role: string;
+  workspaceRole?: "owner" | "admin" | "member";
   status: UserStatus;
   statusText?: string;
   avatarColor?: string;
 }
 
-export type ChannelType = 'text' | 'audio' | 'video';
+export type ChannelType = "text" | "audio" | "video";
 
 export interface Channel {
   id: string;
@@ -21,23 +23,10 @@ export interface Channel {
   unreadCount?: number;
   isPrivate?: boolean;
   memberCount: number;
-  activeCall?: {
-    mode: 'audio' | 'video';
-    participantCount: number;
-    startedAt: string;
-  };
-}
-
-export interface Attachment {
-  id: string;
-  name: string;
-  size: string;
-  type: 'image' | 'code' | 'document';
-}
-
-export interface VoiceNoteData {
-  duration: string;
-  waveform: number[];
+  createdById?: string | null;
+  canManageMembers?: boolean;
+  canManageChannel?: boolean;
+  canLeave?: boolean;
 }
 
 export interface Reaction {
@@ -52,31 +41,29 @@ export interface Message {
   sender: User;
   timestamp: string;
   content: string;
+  version: number;
+  updatedAt: string;
+  editedAt?: string | null;
+  deletedAt?: string | null;
+  canEdit: boolean;
+  canDelete: boolean;
+  canPin: boolean;
   codeSnippet?: {
     language: string;
     code: string;
   };
-  attachments?: Attachment[];
-  voiceNote?: VoiceNoteData;
   reactions?: Reaction[];
   isPinned?: boolean;
 }
 
-export interface CallParticipant {
-  id: string;
-  user: User;
-  isSpeaking: boolean;
-  isMuted: boolean;
-  isVideoOn: boolean;
-  isScreenSharing: boolean;
-  audioLevel: number;
-  stream?: any;
-  accentColor: string;
+export interface ChannelMember extends User {
+  canRemove: boolean;
+  channelRole: string;
+  workspaceRole: "owner" | "admin" | "member";
+  joinedAt: string;
 }
 
-export type CallMode = 'none' | 'audio' | 'video';
-
-export type ThemeMode = 'dark' | 'light';
+export type ThemeMode = "dark" | "light";
 
 export interface WorkspaceSettings {
   micDeviceId: string;

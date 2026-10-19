@@ -1,257 +1,131 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  Modal,
-  ScrollView,
-  Pressable,
-  Switch,
-  StyleSheet,
-  SafeAreaView,
-} from 'react-native';
-import { BrutalColors, Fonts } from '@/constants/theme';
-import { WorkspaceSettings } from '@/types';
-import { BrutalCard } from './brutal/BrutalCard';
-import { BrutalButton } from './brutal/BrutalButton';
+/** Appearance changes are server-confirmed and shared with the web account. */
+import { useBrutalStyles, type BrutalPalette } from "@/hooks/use-brutal-theme";
+import { useRef, useState } from "react";
+import { Modal, ScrollView, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useReducedMotion } from "react-native-reanimated";
+import { Fonts } from "@/constants/theme";
+import type { ThemeMode, WorkspaceSettings } from "@/types/chat";
+import { BrutalButton } from "./brutal/BrutalButton";
 
-interface SettingsModalViewProps {
+interface Props {
   visible: boolean;
   onClose: () => void;
   settings: WorkspaceSettings;
-  onUpdateSettings: (newSettings: Partial<WorkspaceSettings>) => void;
+  onUpdateSettings: (values: Partial<WorkspaceSettings>) => Promise<void>;
 }
-
-export const SettingsModalView: React.FC<SettingsModalViewProps> = ({
+export function SettingsModalView({
   visible,
   onClose,
   settings,
   onUpdateSettings,
-}) => {
-  const [noiseCancellation, setNoiseCancellation] = useState(settings.noiseCancellation);
-  const [spatialAudio, setSpatialAudio] = useState(settings.spatialAudio);
-
-  const handleSave = () => {
-    onUpdateSettings({
-      noiseCancellation,
-      spatialAudio,
-    });
-    onClose();
+}: Props) {
+  const styles = useBrutalStyles(createStyles);
+  const [theme, setTheme] = useState<ThemeMode>(settings.theme);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const inFlight = useRef(false);
+  const reduceMotion = useReducedMotion();
+  const save = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setSaving(true);
+    setError("");
+    try {
+      await onUpdateSettings({ theme });
+      onClose();
+    } catch (failure: unknown) {
+      setError(
+        failure instanceof Error
+          ? failure.message
+          : "Preferences could not be saved.",
+      );
+    } finally {
+      inFlight.current = false;
+      setSaving(false);
+    }
   };
-
   return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <View style={styles.modalOverlay}>
-        <SafeAreaView style={styles.modalContainer}>
-          {/* Header */}
-          <View style={styles.header}>
-            <View>
-              <Text style={styles.headerTitle}>STUDIO SETTINGS</Text>
-              <Text style={styles.headerSubtitle}>AUDIO, VIDEO & PREFERENCES</Text>
-            </View>
-            <Pressable onPress={onClose} style={styles.closeBtn}>
-              <Text style={styles.closeBtnText}>✕</Text>
-            </Pressable>
+    <Modal
+      visible={visible}
+      animationType={reduceMotion ? "none" : "slide"}
+      onRequestClose={() => {
+        if (!saving) onClose();
+      }}
+    >
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>PREFERENCES</Text>
+          <BrutalButton
+            title="Close"
+            variant="outline"
+            size="sm"
+            disabled={saving}
+            onPress={onClose}
+          />
+        </View>
+        <ScrollView contentContainerStyle={styles.body}>
+          <Text style={styles.heading}>APPEARANCE</Text>
+          <Text style={styles.copy}>
+            Your theme is saved to your account and applied on web and mobile.
+          </Text>
+          <View style={styles.row}>
+            {(["light", "dark"] as const).map((mode) => (
+              <BrutalButton
+                key={mode}
+                title={`${mode}${theme === mode ? " · selected" : ""}`}
+                variant={theme === mode ? "yellow" : "outline"}
+                disabled={saving}
+                onPress={() => setTheme(mode)}
+              />
+            ))}
           </View>
-
-          <ScrollView contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
-            {/* Audio Processing */}
-            <Text style={styles.sectionHeader}>AUDIO PROCESSING</Text>
-
-            <BrutalCard style={styles.settingCard}>
-              <View style={styles.settingRow}>
-                <View style={styles.settingTextCol}>
-                  <Text style={styles.settingTitle}>AI Noise Cancellation</Text>
-                  <Text style={styles.settingDesc}>
-                    Suppress keyboard clatter, air conditioners, and background studio noise
-                  </Text>
-                </View>
-                <Switch
-                  value={noiseCancellation}
-                  onValueChange={setNoiseCancellation}
-                  trackColor={{ false: BrutalColors.inkFaint, true: BrutalColors.accentGreen }}
-                  thumbColor={BrutalColors.ink}
-                />
-              </View>
-            </BrutalCard>
-
-            <BrutalCard style={styles.settingCard}>
-              <View style={styles.settingRow}>
-                <View style={styles.settingTextCol}>
-                  <Text style={styles.settingTitle}>Binaural Spatial Audio</Text>
-                  <Text style={styles.settingDesc}>
-                    Position huddle voices across the stereo field according to stage layout
-                  </Text>
-                </View>
-                <Switch
-                  value={spatialAudio}
-                  onValueChange={setSpatialAudio}
-                  trackColor={{ false: BrutalColors.inkFaint, true: BrutalColors.accentGreen }}
-                  thumbColor={BrutalColors.ink}
-                />
-              </View>
-            </BrutalCard>
-
-            {/* Video Quality */}
-            <Text style={styles.sectionHeader}>VIDEO & RENDERING</Text>
-            <BrutalCard style={styles.settingCard}>
-              <Text style={styles.settingTitle}>WebRTC Pipeline</Text>
-              <Text style={styles.settingDesc}>
-                1080p 60fps hardware accelerated canvas decoding
-              </Text>
-              <View style={styles.tagRow}>
-                <View style={styles.pillActive}>
-                  <Text style={styles.pillActiveText}>HARDWARE ACCEL</Text>
-                </View>
-                <View style={styles.pillInactive}>
-                  <Text style={styles.pillInactiveText}>NEO-BRUTAL CSS</Text>
-                </View>
-              </View>
-            </BrutalCard>
-
-            {/* Save Button */}
-            <BrutalButton
-              title="APPLY & CLOSE →"
-              onPress={handleSave}
-              variant="yellow"
-              size="lg"
-              style={styles.saveBtn}
-            />
-          </ScrollView>
-        </SafeAreaView>
-      </View>
+          {error ? (
+            <Text accessibilityRole="alert" style={styles.copy}>
+              {error}
+            </Text>
+          ) : null}
+          <BrutalButton
+            title={saving ? "Saving..." : "Save preferences"}
+            disabled={saving}
+            onPress={() => {
+              void save();
+            }}
+          />
+        </ScrollView>
+      </SafeAreaView>
     </Modal>
   );
-};
-
-const styles = StyleSheet.create({
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(26, 26, 26, 0.6)',
-    justifyContent: 'flex-end',
-  },
-  modalContainer: {
-    maxHeight: '85%',
-    backgroundColor: BrutalColors.bgPaper,
-    borderTopWidth: 4,
-    borderTopColor: BrutalColors.border,
-    borderLeftWidth: 3,
-    borderRightWidth: 3,
-    borderColor: BrutalColors.border,
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    borderBottomWidth: 3,
-    borderBottomColor: BrutalColors.border,
-    backgroundColor: BrutalColors.bgCard,
-  },
-  headerTitle: {
-    fontFamily: Fonts?.sans,
-    fontWeight: '900',
-    fontSize: 16,
-    color: BrutalColors.ink,
-    letterSpacing: 0.5,
-  },
-  headerSubtitle: {
-    fontFamily: Fonts?.mono,
-    fontSize: 10,
-    fontWeight: '800',
-    color: BrutalColors.inkMuted,
-    letterSpacing: 0.8,
-  },
-  closeBtn: {
-    width: 34,
-    height: 34,
-    borderWidth: 2,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
-    backgroundColor: BrutalColors.bgCardAlt,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeBtnText: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: BrutalColors.ink,
-  },
-  scrollBody: {
-    padding: 18,
-    gap: 14,
-  },
-  sectionHeader: {
-    fontFamily: Fonts?.sans,
-    fontWeight: '900',
-    fontSize: 12,
-    color: BrutalColors.inkSecondary,
-    letterSpacing: 0.8,
-    marginTop: 4,
-  },
-  settingCard: {
-    padding: 14,
-    gap: 8,
-  },
-  settingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  settingTextCol: {
-    flex: 1,
-  },
-  settingTitle: {
-    fontFamily: Fonts?.sans,
-    fontWeight: '800',
-    fontSize: 14,
-    color: BrutalColors.ink,
-  },
-  settingDesc: {
-    fontFamily: Fonts?.sans,
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '500',
-    color: BrutalColors.inkMuted,
-    marginTop: 2,
-  },
-  tagRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 4,
-  },
-  pillActive: {
-    borderWidth: 1.5,
-    borderColor: BrutalColors.border,
-    borderRadius: 3,
-    backgroundColor: '#D1FAE5',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  pillActiveText: {
-    fontFamily: Fonts?.mono,
-    fontSize: 9,
-    fontWeight: '900',
-    color: BrutalColors.accentGreen,
-  },
-  pillInactive: {
-    borderWidth: 1.5,
-    borderColor: BrutalColors.border,
-    borderRadius: 3,
-    backgroundColor: BrutalColors.bgCardAlt,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  pillInactiveText: {
-    fontFamily: Fonts?.mono,
-    fontSize: 9,
-    fontWeight: '800',
-    color: BrutalColors.inkSecondary,
-  },
-  saveBtn: {
-    marginTop: 10,
-  },
-});
+}
+const createStyles = (BrutalColors: BrutalPalette) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: BrutalColors.bgPaper },
+    header: {
+      padding: 16,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      borderBottomWidth: 3,
+      borderColor: BrutalColors.border,
+    },
+    title: {
+      fontFamily: Fonts.sans,
+      fontWeight: "900",
+      fontSize: 22,
+      color: BrutalColors.ink,
+    },
+    body: { padding: 24, gap: 20 },
+    heading: {
+      fontFamily: Fonts.sans,
+      fontWeight: "900",
+      fontSize: 16,
+      color: BrutalColors.ink,
+    },
+    copy: {
+      fontFamily: Fonts.sans,
+      fontSize: 15,
+      lineHeight: 22,
+      color: BrutalColors.inkSecondary,
+    },
+    row: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  });

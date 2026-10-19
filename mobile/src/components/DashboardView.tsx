@@ -1,445 +1,477 @@
-import React, { useState, useEffect, useCallback } from 'react';
+/** Compose native workspace screens and appearance; useChannelMessages owns conversation state. */
+import { useChannelMessages } from "./chat/useChannelMessages";
+import { mergeTeamProfiles } from "./chat/messageState";
 import {
-  View,
-  Text,
+  useBrutalTheme,
+  useBrutalStyles,
+  type BrutalPalette,
+} from "@/hooks/use-brutal-theme";
+import React, { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
   Modal,
-  StyleSheet,
-  SafeAreaView,
-  StatusBar,
   Pressable,
-} from 'react-native';
-import { BrutalColors, Fonts } from '@/constants/theme';
-import {
-  Channel,
-  Message,
-  User,
-  CallMode,
-  CallParticipant,
-  WorkspaceSettings,
-} from '@/types';
-import {
-  INITIAL_CHANNELS,
-  INITIAL_MESSAGES,
-  TEAM_MEMBERS,
-  INITIAL_CALL_PARTICIPANTS,
-  DEFAULT_SETTINGS,
-} from '@/data/mockData';
-import { api } from '@/services/api';
-import { MobileChatView } from './chat/MobileChatView';
-import { MobileAudioHuddle } from './audio/MobileAudioHuddle';
-import { MobileVideoSalon } from './video/MobileVideoSalon';
-import { SidebarDrawer } from './SidebarDrawer';
-import { ContextDrawerModal } from './ContextDrawerModal';
-import { SettingsModalView } from './SettingsModalView';
-import { CommandPaletteModal } from './CommandPaletteModal';
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useReducedMotion } from "react-native-reanimated";
+import { Fonts } from "@/constants/theme";
+import { User, WorkspaceSettings, ThemeMode } from "@/types/chat";
+import { BrutalThemeProvider } from "@/hooks/use-brutal-theme";
+import { api, ApiError } from "@/services/api";
+import { MobileChatView } from "./chat/MobileChatView";
+import { SidebarDrawer } from "./SidebarDrawer";
+import { ContextDrawerModal } from "./ContextDrawerModal";
+import { SettingsModalView } from "./SettingsModalView";
+import { CommandPaletteModal } from "./CommandPaletteModal";
+import { BrutalButton } from "./brutal/BrutalButton";
+import { WorkspaceManagerModal } from "./WorkspaceManagerModal";
+import { ProfileModal } from "./ProfileModal";
+import { MessageSearchModal } from "./MessageSearchModal";
 
 interface DashboardViewProps {
   currentUser: User;
   onLogout: () => void;
+  onProfileUpdated: (user: User) => void;
 }
-
 export const DashboardView: React.FC<DashboardViewProps> = ({
   currentUser,
   onLogout,
+  onProfileUpdated,
 }) => {
-  const [channels, setChannels] = useState<Channel[]>(INITIAL_CHANNELS);
-  const [activeChannelId, setActiveChannelId] = useState<string>(
-    INITIAL_CHANNELS[0]?.id || ''
-  );
-  const [messages, setMessages] = useState<Record<string, Message[]>>(INITIAL_MESSAGES);
-  const [teamMembers, setTeamMembers] = useState<User[]>(TEAM_MEMBERS);
-  const [participants] = useState<CallParticipant[]>(INITIAL_CALL_PARTICIPANTS);
-
-  // Call states
-  const [callMode, setCallMode] = useState<CallMode>('none');
-  const [isPiP, setIsPiP] = useState<boolean>(false);
-  const [isMuted, setIsMuted] = useState<boolean>(false);
-  const [isDeafened, setIsDeafened] = useState<boolean>(false);
-  const [isVideoOn, setIsVideoOn] = useState<boolean>(false);
-
-  // Modals & Drawers
-  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
-  const [isContextDrawerOpen, setIsContextDrawerOpen] = useState<boolean>(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
-  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
-
-  // Settings
-  const [settings, setSettings] = useState<WorkspaceSettings>(DEFAULT_SETTINGS);
-
-  // Initial data load
-  useEffect(() => {
-    let mounted = true;
-
-    const loadData = async () => {
-      try {
-        const [fetchedChannels, allMessages, fetchedSettings, fetchedTeam] =
-          await Promise.allSettled([
-            api.fetchChannels(),
-            api.fetchAllMessages(),
-            api.fetchSettings(),
-            api.fetchTeamMembers(),
-          ]);
-
-        if (mounted) {
-          if (fetchedChannels.status === 'fulfilled' && fetchedChannels.value.length > 0) {
-            setChannels(fetchedChannels.value);
-            if (!activeChannelId) {
-              setActiveChannelId(fetchedChannels.value[0].id);
-            }
-          }
-          if (allMessages.status === 'fulfilled') {
-            setMessages(allMessages.value);
-          }
-          if (fetchedSettings.status === 'fulfilled') {
-            setSettings(fetchedSettings.value);
-          }
-          if (fetchedTeam.status === 'fulfilled') {
-            setTeamMembers(fetchedTeam.value);
-          }
-        }
-      } catch (err) {
-        console.warn('Mobile data load failed:', err);
-      }
-    };
-
-    loadData();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  const activeChannel =
-    channels.find((c) => c.id === activeChannelId) || channels[0];
-
-  // Send message
-  const handleSendMessage = useCallback(
-    async (content: string, voiceNote?: { duration: string; waveform: number[] }) => {
-      const now = new Date();
-      const hours = now.getHours();
-      const minutes = now.getMinutes();
-      const ampm = hours >= 12 ? 'PM' : 'AM';
-      const formattedHours = hours % 12 || 12;
-      const formattedMinutes = minutes < 10 ? `0${minutes}` : minutes;
-      const timestamp = `${formattedHours}:${formattedMinutes} ${ampm}`;
-
-      const tempId = `msg_${Date.now()}`;
-      const optimisticMsg: Message = {
-        id: tempId,
-        channelId: activeChannelId,
-        sender: currentUser,
-        timestamp,
-        content,
-        voiceNote,
-      };
-
-      setMessages((prev) => ({
-        ...prev,
-        [activeChannelId]: [...(prev[activeChannelId] || []), optimisticMsg],
-      }));
-
-      try {
-        const saved = await api.sendMessage(activeChannelId, content, voiceNote);
-        setMessages((prev) => ({
-          ...prev,
-          [activeChannelId]: (prev[activeChannelId] || []).map((m) =>
-            m.id === tempId ? saved : m
-          ),
-        }));
-      } catch (err) {
-        console.warn('Sync failed:', err);
-      }
-    },
-    [activeChannelId, currentUser]
-  );
-
-  // Toggle reactions
-  const handleToggleReaction = useCallback(
-    async (messageId: string, icon: string) => {
-      setMessages((prev) => {
-        const channelMessages = prev[activeChannelId] || [];
-        const updated = channelMessages.map((msg) => {
-          if (msg.id !== messageId) return msg;
-
-          const existingReactions = msg.reactions ? [...msg.reactions] : [];
-          const existingIndex = existingReactions.findIndex((r) => r.icon === icon);
-
-          if (existingIndex >= 0) {
-            const current = existingReactions[existingIndex];
-            if (current.reactedByMe) {
-              if (current.count <= 1) {
-                existingReactions.splice(existingIndex, 1);
-              } else {
-                existingReactions[existingIndex] = {
-                  ...current,
-                  count: current.count - 1,
-                  reactedByMe: false,
-                };
-              }
-            } else {
-              existingReactions[existingIndex] = {
-                ...current,
-                count: current.count + 1,
-                reactedByMe: true,
-              };
-            }
-          } else {
-            existingReactions.push({ icon, count: 1, reactedByMe: true });
-          }
-
-          return { ...msg, reactions: existingReactions };
-        });
-
-        return { ...prev, [activeChannelId]: updated };
-      });
-
-      try {
-        await api.toggleReaction(messageId, icon);
-      } catch (err) {
-        console.warn('Reaction sync error:', err);
-      }
-    },
-    [activeChannelId]
-  );
-
-  // Call controls
-  const handleStartCall = useCallback((mode: 'audio' | 'video') => {
-    setCallMode(mode);
-    setIsPiP(false);
-    if (mode === 'video') setIsVideoOn(true);
-  }, []);
-
-  const handleLeaveCall = useCallback(() => {
-    setCallMode('none');
-    setIsPiP(false);
-    setIsVideoOn(false);
-  }, []);
-
-  if (!activeChannel) {
-    return (
-      <SafeAreaView style={styles.loadingArea}>
-        <View style={styles.loadingBox}>
-          <Text style={styles.loadingTitle}>LOADING STUDIO...</Text>
-          <Text style={styles.loadingSub}>Fable mobile environment</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
+  const [theme, setTheme] = useState<ThemeMode>("light");
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor={BrutalColors.bgPaper} />
-      <View style={styles.container}>
-        {/* Main Stage Content */}
-        {callMode === 'audio' && !isPiP ? (
-          <MobileAudioHuddle
-            channel={activeChannel}
-            participants={participants}
-            currentUser={currentUser}
-            isMuted={isMuted}
-            onToggleMute={() => setIsMuted((m) => !m)}
-            isDeafened={isDeafened}
-            onToggleDeafen={() => setIsDeafened((d) => !d)}
-            onLeaveCall={handleLeaveCall}
-            onUpgradeToVideo={() => handleStartCall('video')}
-            onMinimizeToPiP={() => setIsPiP(true)}
-          />
-        ) : callMode === 'video' && !isPiP ? (
-          <MobileVideoSalon
-            channel={activeChannel}
-            participants={participants}
-            currentUser={currentUser}
-            isMuted={isMuted}
-            onToggleMute={() => setIsMuted((m) => !m)}
-            isVideoOn={isVideoOn}
-            onToggleVideo={() => setIsVideoOn((v) => !v)}
-            onLeaveCall={handleLeaveCall}
-            onMinimizeToPiP={() => setIsPiP(true)}
-          />
-        ) : (
-          <View style={styles.chatWrapper}>
-            <MobileChatView
-              channel={activeChannel}
-              messages={messages[activeChannelId] || []}
-              currentUser={currentUser}
-              onSendMessage={handleSendMessage}
-              onToggleReaction={handleToggleReaction}
-              onStartCall={handleStartCall}
-              activeCallMode={callMode}
-              onToggleDrawer={() => setIsDrawerOpen(true)}
-              onOpenContextDrawer={() => setIsContextDrawerOpen(true)}
-            />
+    <BrutalThemeProvider mode={theme}>
+      <DashboardContent
+        currentUser={currentUser}
+        onLogout={onLogout}
+        onProfileUpdated={onProfileUpdated}
+        onThemeLoaded={setTheme}
+      />
+    </BrutalThemeProvider>
+  );
+};
+const DashboardContent: React.FC<
+  DashboardViewProps & { onThemeLoaded: (theme: ThemeMode) => void }
+> = ({ currentUser, onLogout, onProfileUpdated, onThemeLoaded }) => {
+  const BrutalColors = useBrutalTheme();
+  const styles = useBrutalStyles(createStyles);
+  const [teamMembers, setTeamMembers] = useState<User[]>([]);
+  const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isContextDrawerOpen, setIsContextDrawerOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isMessageSearchOpen, setIsMessageSearchOpen] = useState(false);
+  const [notice, setNotice] = useState("");
+  const reduceMotion = useReducedMotion();
 
-            {/* Floating PiP Bar if in call */}
-            {callMode !== 'none' && isPiP && (
-              <Pressable
-                onPress={() => setIsPiP(false)}
-                style={styles.pipBar}
-              >
-                <View style={styles.pipDot} />
-                <Text style={styles.pipText}>
-                  {callMode === 'audio' ? 'VOICE HUDDLE ACTIVE' : 'VIDEO SALON ACTIVE'} (#{activeChannel.name})
-                </Text>
-                <Pressable onPress={handleLeaveCall} style={styles.pipLeaveBtn}>
-                  <Text style={styles.pipLeaveBtnText}>END</Text>
-                </Pressable>
-              </Pressable>
+  const {
+    activeChannel,
+    activeChannelId,
+    setActiveChannel,
+    messages,
+    pinnedMessages,
+    actionMessage,
+    setActionMessage,
+    messageError,
+    messagesLoading,
+    pinsLoading,
+    historyPage,
+    pinPage,
+    archive,
+    pinsArchive,
+    pageRevision,
+    pinPageRevision,
+    retry,
+    highlightedMessageId,
+    selectChannel,
+    navigateHistory,
+    handleSendMessage,
+    handleToggleReaction,
+    handleEditMessage,
+    handleDeleteMessage,
+    handlePinMessage,
+    openSearchMessage,
+    resetChat,
+    setLoadedChannel,
+    getSelectedChannelId,
+    updateChatProfile,
+    setPinnedView,
+    refreshMessages,
+  } = useChannelMessages({
+    setNotice,
+    onAccessLost: () => {
+      setIsContextDrawerOpen(false);
+      setNotice(
+        "This channel is no longer accessible. Reloading your available workspace.",
+      );
+      setLoading(true);
+    },
+    onMetadataLoaded: (profiles, self, preferences) => {
+      setTeamMembers((previous) => mergeTeamProfiles(previous, profiles));
+      onProfileUpdated(self);
+      setSettings(preferences);
+      onThemeLoaded(preferences.theme);
+    },
+  });
+  useEffect(() => {
+    const controller = new AbortController();
+    let disposed = false;
+    const loadWorkspace = async () => {
+      const savedId = api.getSelectedWorkspaceId();
+      let accessibleId = savedId;
+      if (savedId) {
+        try {
+          await api.fetchWorkspace(savedId, { signal: controller.signal });
+        } catch (error) {
+          if (
+            !(error instanceof ApiError) ||
+            ![403, 404].includes(error.status)
+          )
+            throw error;
+          accessibleId = null;
+          if (!disposed)
+            setNotice(
+              "Your saved workspace is no longer accessible. Showing an available workspace.",
+            );
+        }
+      }
+      if (!accessibleId)
+        accessibleId = (
+          await api.fetchWorkspaces({ limit: 1, signal: controller.signal })
+        ).currentWorkspaceId;
+      if (disposed) return;
+      await api.selectWorkspace(accessibleId);
+      if (!accessibleId) {
+        setLoadedChannel(null);
+        setTeamMembers([]);
+        setSettings(null);
+        setNotice("Create or join a workspace to continue.");
+        return;
+      }
+      const [rooms, nextSettings, nextTeam] = await Promise.all([
+        api.fetchChannels({ signal: controller.signal }),
+        api.fetchSettings({ signal: controller.signal }),
+        api.fetchTeamMembers({ signal: controller.signal }),
+      ]);
+      if (disposed) return;
+      let selected = rooms.find((room) => room.id === getSelectedChannelId());
+      if (!selected && getSelectedChannelId()) {
+        try {
+          selected = await api.fetchChannel(getSelectedChannelId(), {
+            signal: controller.signal,
+          });
+        } catch (error) {
+          if (
+            !(error instanceof ApiError) ||
+            ![403, 404].includes(error.status)
+          )
+            throw error;
+        }
+      }
+      if (disposed) return;
+      const room = selected || rooms[0] || null;
+      setSettings(nextSettings);
+      onThemeLoaded(nextSettings.theme);
+      setTeamMembers((previous) => mergeTeamProfiles(previous, nextTeam));
+      setLoadedChannel(room);
+    };
+    loadWorkspace()
+      .catch((error: unknown) => {
+        if (!disposed)
+          setLoadError(
+            error instanceof Error
+              ? error.message
+              : "Unable to load your workspace.",
+          );
+      })
+      .finally(() => {
+        if (!disposed) setLoading(false);
+      });
+    return () => {
+      disposed = true;
+      controller.abort();
+    };
+  }, [retry, onThemeLoaded, getSelectedChannelId, setLoadedChannel]);
+  const reload = () => {
+    resetChat();
+    setLoading(true);
+    setLoadError("");
+  };
+  const membershipChanged = async (left: boolean) => {
+    if (left) {
+      setIsContextDrawerOpen(false);
+      selectChannel("");
+      reload();
+      return;
+    }
+    setActiveChannel(await api.fetchChannel(getSelectedChannelId()));
+  };
+  const saveProfile = async (values: { name: string; statusText: string }) => {
+    const saved = await api.updateProfile(values);
+    onProfileUpdated(saved);
+    setTeamMembers((previous) =>
+      previous.map((member) =>
+        member.id === saved.id ? { ...member, ...saved } : member,
+      ),
+    );
+    updateChatProfile(saved);
+  };
+  const closeDrawer = () => setIsDrawerOpen(false);
+  return (
+    <SafeAreaView
+      style={styles.safeArea}
+      edges={activeChannel ? ["top"] : ["top", "bottom"]}
+    >
+      <StatusBar
+        barStyle={
+          BrutalColors.bgPaper === "#171A20" ? "light-content" : "dark-content"
+        }
+        backgroundColor={BrutalColors.bgPaper}
+      />
+      {notice ? (
+        <View style={styles.notice}>
+          <Text accessibilityRole="alert" style={{ flex: 1 }}>
+            {notice}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss notification"
+            onPress={() => setNotice("")}
+            hitSlop={8}
+          >
+            <Text>Close</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {loading ? (
+        <View style={styles.state}>
+          <ActivityIndicator color={BrutalColors.ink} />
+          <Text style={styles.title}>Loading your workspace...</Text>
+        </View>
+      ) : loadError ? (
+        <View style={styles.state}>
+          <Text accessibilityRole="alert" style={styles.title}>
+            {loadError}
+          </Text>
+          <BrutalButton title="Try again" onPress={reload} />
+          <BrutalButton
+            title="Choose workspace"
+            variant="outline"
+            onPress={() => setIsWorkspaceOpen(true)}
+          />
+          <BrutalButton title="Log out" variant="outline" onPress={onLogout} />
+        </View>
+      ) : activeChannel ? (
+        <View style={styles.container}>
+          {messageError ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Retry loading messages"
+              onPress={() => {
+                void refreshMessages();
+              }}
+              style={styles.error}
+            >
+              <Text accessibilityRole="alert">
+                {messageError} - Tap to retry
+              </Text>
+            </Pressable>
+          ) : null}
+          <MobileChatView
+            key={activeChannel.id}
+            channel={activeChannel}
+            messages={messages}
+            teamMembers={teamMembers}
+            onSendMessage={handleSendMessage}
+            onToggleReaction={handleToggleReaction}
+            onEditMessage={handleEditMessage}
+            onDeleteMessage={handleDeleteMessage}
+            onPinMessage={handlePinMessage}
+            pinnedMessages={pinnedMessages}
+            actionMessage={actionMessage}
+            onActionMessageChanged={setActionMessage}
+            pinnedLoading={pinsLoading}
+            onToggleDrawer={() => setIsDrawerOpen(true)}
+            onOpenContextDrawer={() => setIsContextDrawerOpen(true)}
+            onOpenMessageSearch={() => setIsMessageSearchOpen(true)}
+            highlightedMessageId={highlightedMessageId}
+            loading={messagesLoading}
+            archive={archive}
+            pinsArchive={pinsArchive}
+            pageRevision={pageRevision}
+            pinPageRevision={pinPageRevision}
+            hasOlder={Boolean(
+              historyPage?.hasOlder || (!archive && messages.length >= 100),
             )}
-          </View>
-        )}
-
-        {/* ═══ SIDEBAR DRAWER MODAL ═══ */}
+            hasNewer={Boolean(historyPage?.hasNewer)}
+            hasOlderPins={Boolean(
+              pinPage?.hasOlder ||
+              (!pinsArchive && pinnedMessages.length >= 100),
+            )}
+            hasNewerPins={Boolean(pinPage?.hasNewer)}
+            onNavigateHistory={(direction, pinned) => {
+              void navigateHistory(direction, pinned);
+            }}
+            onPinnedViewChanged={setPinnedView}
+          />
+        </View>
+      ) : activeChannelId ? (
+        <View style={styles.state}>
+          <ActivityIndicator color={BrutalColors.ink} />
+          <Text style={{ color: BrutalColors.ink }}>Loading channel...</Text>
+          {messageError ? (
+            <Text accessibilityRole="alert" style={{ color: BrutalColors.ink }}>
+              {messageError}
+            </Text>
+          ) : null}
+          <BrutalButton
+            title="Try again"
+            onPress={() => {
+              void refreshMessages();
+            }}
+          />
+        </View>
+      ) : (
+        <View style={styles.state}>
+          <Text style={styles.title}>No channels yet</Text>
+          <Text style={{ color: BrutalColors.ink }}>
+            Create a channel to start a conversation.
+          </Text>
+          <BrutalButton
+            title="Manage workspace"
+            onPress={() => setIsWorkspaceOpen(true)}
+          />
+          <BrutalButton title="Refresh" onPress={reload} />
+          <BrutalButton title="Log out" variant="outline" onPress={onLogout} />
+        </View>
+      )}
+      {isDrawerOpen && (
         <Modal
-          visible={isDrawerOpen}
-          animationType="slide"
+          visible
+          animationType={reduceMotion ? "none" : "slide"}
           presentationStyle="pageSheet"
-          onRequestClose={() => setIsDrawerOpen(false)}
+          onRequestClose={closeDrawer}
         >
           <SidebarDrawer
-            channels={channels}
-            teamMembers={teamMembers}
             activeChannelId={activeChannelId}
-            onSelectChannel={(id) => {
-              setActiveChannelId(id);
-              if (callMode !== 'none') setIsPiP(true);
-            }}
+            onSelectChannel={selectChannel}
             currentUser={currentUser}
-            isMuted={isMuted}
-            onToggleMute={() => setIsMuted((m) => !m)}
-            isDeafened={isDeafened}
-            onToggleDeafen={() => setIsDeafened((d) => !d)}
             onOpenSettings={() => {
-              setIsDrawerOpen(false);
+              closeDrawer();
               setIsSettingsOpen(true);
             }}
             onOpenSearch={() => {
-              setIsDrawerOpen(false);
+              closeDrawer();
               setIsCommandPaletteOpen(true);
             }}
-            activeCallMode={callMode}
-            onJoinHuddle={(channel, mode) => {
-              setActiveChannelId(channel.id);
-              handleStartCall(mode);
+            onOpenProfile={() => {
+              closeDrawer();
+              setIsProfileOpen(true);
             }}
             onLogout={onLogout}
-            onClose={() => setIsDrawerOpen(false)}
+            onClose={closeDrawer}
+            onOpenWorkspace={() => {
+              closeDrawer();
+              setIsWorkspaceOpen(true);
+            }}
           />
         </Modal>
-
-        {/* ═══ CONTEXT / MEMBERS DRAWER ═══ */}
+      )}
+      {isContextDrawerOpen && activeChannel && (
         <ContextDrawerModal
-          visible={isContextDrawerOpen}
+          key={activeChannel.id}
+          visible
           onClose={() => setIsContextDrawerOpen(false)}
           channel={activeChannel}
           teamMembers={teamMembers}
-          callParticipants={participants}
+          currentUser={currentUser}
+          onMembershipChanged={membershipChanged}
         />
-
-        {/* ═══ WORKSPACE SETTINGS MODAL ═══ */}
+      )}
+      {isSettingsOpen && settings && (
         <SettingsModalView
-          visible={isSettingsOpen}
+          visible
           onClose={() => setIsSettingsOpen(false)}
           settings={settings}
-          onUpdateSettings={(newVals) => {
-            setSettings((prev) => ({ ...prev, ...newVals }));
-            api.updateSettings(newVals).catch(() => {});
+          onUpdateSettings={async (values) => {
+            const saved = await api.updateSettings(values);
+            setSettings(saved);
+            onThemeLoaded(saved.theme);
           }}
         />
-
-        {/* ═══ COMMAND PALETTE / SEARCH MODAL ═══ */}
-        <CommandPaletteModal
-          visible={isCommandPaletteOpen}
-          onClose={() => setIsCommandPaletteOpen(false)}
-          channels={channels}
-          teamMembers={teamMembers}
-          onSelectChannel={(id) => setActiveChannelId(id)}
-          onStartCall={handleStartCall}
-          onOpenSettings={() => setIsSettingsOpen(true)}
-          onToggleMute={() => setIsMuted((m) => !m)}
+      )}
+      {isWorkspaceOpen && (
+        <WorkspaceManagerModal
+          currentUser={currentUser}
+          onClose={() => setIsWorkspaceOpen(false)}
+          onChanged={(channelId) => {
+            selectChannel(channelId || "");
+            reload();
+          }}
         />
-      </View>
+      )}
+      {isProfileOpen && (
+        <ProfileModal
+          user={currentUser}
+          onClose={() => setIsProfileOpen(false)}
+          onSave={saveProfile}
+          onLogout={onLogout}
+        />
+      )}
+      {isMessageSearchOpen && activeChannel && (
+        <MessageSearchModal
+          channelId={activeChannel.id}
+          channelName={activeChannel.name}
+          onClose={() => setIsMessageSearchOpen(false)}
+          onSelectMessage={openSearchMessage}
+        />
+      )}
+      {isCommandPaletteOpen && (
+        <CommandPaletteModal
+          visible
+          onClose={() => setIsCommandPaletteOpen(false)}
+          onSelectChannel={selectChannel}
+          onOpenMessageSearch={
+            activeChannel ? () => setIsMessageSearchOpen(true) : undefined
+          }
+          onOpenSettings={() => setIsSettingsOpen(true)}
+        />
+      )}
     </SafeAreaView>
   );
 };
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: BrutalColors.bgPaper,
-  },
-  container: {
-    flex: 1,
-  },
-  chatWrapper: {
-    flex: 1,
-    position: 'relative',
-  },
-  pipBar: {
-    position: 'absolute',
-    top: 55,
-    left: 14,
-    right: 14,
-    backgroundColor: BrutalColors.ink,
-    borderWidth: 2.5,
-    borderColor: BrutalColors.accentGreen,
-    borderRadius: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    zIndex: 99,
-  },
-  pipDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: BrutalColors.accentGreen,
-  },
-  pipText: {
-    flex: 1,
-    fontFamily: Fonts?.mono,
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  pipLeaveBtn: {
-    borderWidth: 1.5,
-    borderColor: BrutalColors.accentPink,
-    borderRadius: 3,
-    backgroundColor: '#FFE0E9',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  pipLeaveBtnText: {
-    fontFamily: Fonts?.mono,
-    fontSize: 9,
-    fontWeight: '900',
-    color: BrutalColors.accentPink,
-  },
-  loadingArea: {
-    flex: 1,
-    backgroundColor: BrutalColors.bgPaper,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingBox: {
-    backgroundColor: BrutalColors.bgCard,
-    borderWidth: 3,
-    borderColor: BrutalColors.border,
-    padding: 24,
-    borderRadius: 4,
-    alignItems: 'center',
-    gap: 8,
-  },
-  loadingTitle: {
-    fontFamily: Fonts?.sans,
-    fontWeight: '900',
-    fontSize: 18,
-    color: BrutalColors.ink,
-  },
-  loadingSub: {
-    fontFamily: Fonts?.mono,
-    fontSize: 11,
-    color: BrutalColors.inkMuted,
-  },
-});
+const createStyles = (BrutalColors: BrutalPalette) =>
+  StyleSheet.create({
+    safeArea: { flex: 1, backgroundColor: BrutalColors.bgPaper },
+    container: { flex: 1 },
+    state: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 24,
+      gap: 20,
+    },
+    title: {
+      fontFamily: Fonts.sans,
+      fontSize: 20,
+      fontWeight: "800",
+      color: BrutalColors.ink,
+    },
+    error: { padding: 12, backgroundColor: "#FFE0E9" },
+    notice: {
+      padding: 16,
+      backgroundColor: BrutalColors.accentYellow,
+      flexDirection: "row",
+      gap: 16,
+    },
+  });

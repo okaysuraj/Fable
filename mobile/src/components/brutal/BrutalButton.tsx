@@ -1,4 +1,10 @@
-import React, { useState } from 'react';
+/** Shared native button sizes, palette variants and reduced-motion press feedback. */
+import {
+  useBrutalTheme,
+  useBrutalStyles,
+  type BrutalPalette,
+} from "@/hooks/use-brutal-theme";
+import React from "react";
 import {
   Pressable,
   Text,
@@ -6,16 +12,19 @@ import {
   TextStyle,
   StyleSheet,
   Platform,
-} from 'react-native';
-import { BrutalColors, Fonts } from '@/constants/theme';
+} from "react-native";
+import { Fonts } from "@/constants/theme";
+import { useReducedMotion } from "react-native-reanimated";
 
-export type BrutalButtonVariant = 'yellow' | 'pink' | 'blue' | 'green' | 'outline' | 'dark';
+export type BrutalButtonVariant =
+  "yellow" | "pink" | "blue" | "green" | "outline" | "dark";
 
 interface BrutalButtonProps {
   title: string;
+  accessibilityLabel?: string;
   onPress: () => void;
   variant?: BrutalButtonVariant;
-  size?: 'sm' | 'md' | 'lg';
+  size?: "sm" | "md" | "lg";
   disabled?: boolean;
   style?: ViewStyle;
   textStyle?: TextStyle;
@@ -24,98 +33,77 @@ interface BrutalButtonProps {
 
 export const BrutalButton: React.FC<BrutalButtonProps> = ({
   title,
+  accessibilityLabel,
   onPress,
-  variant = 'yellow',
-  size = 'md',
+  variant = "yellow",
+  size = "md",
   disabled = false,
   style,
   textStyle,
   icon,
 }) => {
-  const [pressed, setPressed] = useState(false);
+  const BrutalColors = useBrutalTheme();
+  const styles = useBrutalStyles(createStyles);
+  const reduceMotion = useReducedMotion();
 
-  const getBackgroundColor = () => {
-    switch (variant) {
-      case 'pink':
-        return BrutalColors.accentPink;
-      case 'blue':
-        return BrutalColors.accentBlue;
-      case 'green':
-        return BrutalColors.accentGreen;
-      case 'dark':
-        return BrutalColors.ink;
-      case 'outline':
-        return 'transparent';
-      case 'yellow':
-      default:
-        return BrutalColors.accentYellow;
-    }
+  const backgroundColors = {
+    yellow: BrutalColors.accentYellow,
+    pink: BrutalColors.accentPink,
+    blue: BrutalColors.accentBlue,
+    green: BrutalColors.accentGreen,
+    dark: "#1A1A1A",
+    outline: "transparent",
   };
-
-  const getTextColor = () => {
-    switch (variant) {
-      case 'pink':
-      case 'blue':
-      case 'dark':
-        return '#FFFFFF';
-      case 'green':
-      case 'yellow':
-      case 'outline':
-      default:
-        return BrutalColors.ink;
-    }
+  const textColors = {
+    yellow: "#1A1A1A",
+    pink: "#FFFFFF",
+    blue: "#FFFFFF",
+    green: "#1A1A1A",
+    dark: "#FFFFFF",
+    outline: BrutalColors.ink,
   };
-
-  const getPadding = () => {
-    switch (size) {
-      case 'sm':
-        return { paddingVertical: 8, paddingHorizontal: 12 };
-      case 'lg':
-        return { paddingVertical: 16, paddingHorizontal: 24 };
-      case 'md':
-      default:
-        return { paddingVertical: 12, paddingHorizontal: 18 };
-    }
+  const sizes = {
+    sm: { paddingVertical: 8, paddingHorizontal: 12, fontSize: 12 },
+    md: { paddingVertical: 12, paddingHorizontal: 18, fontSize: 13 },
+    lg: { paddingVertical: 16, paddingHorizontal: 24, fontSize: 16 },
   };
+  const { fontSize, ...padding } = sizes[size];
 
-  const getFontSize = () => {
-    switch (size) {
-      case 'sm':
-        return 12;
-      case 'lg':
-        return 16;
-      case 'md':
-      default:
-        return 13;
-    }
-  };
-
-  const shadowOffset = size === 'sm' ? 2 : 4;
+  const shadowOffset = size === "sm" ? 2 : 4;
 
   return (
     <Pressable
+      accessibilityLabel={accessibilityLabel || title}
       onPress={onPress}
-      onPressIn={() => setPressed(true)}
-      onPressOut={() => setPressed(false)}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
       disabled={disabled}
-      style={[
+      style={({ pressed }) => [
         styles.button,
-        getPadding(),
+        padding,
         {
-          backgroundColor: getBackgroundColor(),
+          backgroundColor: backgroundColors[variant],
           opacity: disabled ? 0.6 : 1,
-          transform: pressed
-            ? [{ translateX: shadowOffset - 1 }, { translateY: shadowOffset - 1 }]
-            : [{ translateX: 0 }, { translateY: 0 }],
-          ...Platform.select({
+          transform:
+            pressed && !reduceMotion
+              ? [
+                  { translateX: shadowOffset - 1 },
+                  { translateY: shadowOffset - 1 },
+                ]
+              : [{ translateX: 0 }, { translateY: 0 }],
+          ...Platform.select<
+            ViewStyle & { transition?: string; userSelect?: "none" }
+          >({
             web: {
               boxShadow: pressed
-                ? 'none'
+                ? "none"
                 : `${shadowOffset}px ${shadowOffset}px 0px ${BrutalColors.border}`,
-              cursor: disabled ? 'not-allowed' : 'pointer',
-              userSelect: 'none',
-              transition: 'all 100ms cubic-bezier(0, 0.95, 0.35, 1)',
-            } as any,
+              cursor: disabled ? "auto" : "pointer",
+              userSelect: "none",
+              transition: reduceMotion
+                ? "none"
+                : "transform 100ms cubic-bezier(0, 0.95, 0.35, 1)",
+            },
             default: {
               shadowColor: BrutalColors.border,
               shadowOffset: pressed
@@ -135,8 +123,8 @@ export const BrutalButton: React.FC<BrutalButtonProps> = ({
         style={[
           styles.text,
           {
-            color: getTextColor(),
-            fontSize: getFontSize(),
+            color: textColors[variant],
+            fontSize: fontSize,
           },
           textStyle,
         ]}
@@ -147,20 +135,22 @@ export const BrutalButton: React.FC<BrutalButtonProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  button: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    borderWidth: 3,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
-  },
-  text: {
-    fontFamily: Fonts?.sans,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-});
+const createStyles = (BrutalColors: BrutalPalette) =>
+  StyleSheet.create({
+    button: {
+      minHeight: 44,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      borderWidth: 3,
+      borderColor: BrutalColors.border,
+      borderRadius: 4,
+    },
+    text: {
+      fontFamily: Fonts?.sans,
+      fontWeight: "800",
+      letterSpacing: 0.6,
+      textTransform: "uppercase",
+    },
+  });

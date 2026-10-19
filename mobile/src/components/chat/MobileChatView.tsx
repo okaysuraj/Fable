@@ -1,250 +1,221 @@
-import React, { useState, useRef, useEffect } from 'react';
+/** Own virtualized history navigation, composer drafts and native keyboard/scroll interactions. */
+import { MessageRow } from "./MessageRow";
 import {
-  View,
-  Text,
+  useBrutalTheme,
+  useBrutalStyles,
+  type BrutalPalette,
+} from "@/hooks/use-brutal-theme";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  ActivityIndicator,
   FlatList,
-  Pressable,
-  StyleSheet,
-  SafeAreaView,
   KeyboardAvoidingView,
   Platform,
-} from 'react-native';
-import { BrutalColors, Fonts } from '@/constants/theme';
-import { Channel, Message, User, CallMode } from '@/types';
-import { MonogramAvatar } from '../brutal/MonogramAvatar';
-import { BrutalInput } from '../brutal/BrutalInput';
-import { BrutalCard } from '../brutal/BrutalCard';
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useReducedMotion } from "react-native-reanimated";
+import { Fonts } from "@/constants/theme";
+import { Channel, Message, User } from "@/types/chat";
+import { BrutalInput } from "../brutal/BrutalInput";
+import { MessageActionsModal } from "./MessageActionsModal";
 
 interface MobileChatViewProps {
   channel: Channel;
   messages: Message[];
-  currentUser: User;
-  onSendMessage: (content: string, voiceNote?: { duration: string; waveform: number[] }) => void;
+  teamMembers: User[];
+  onSendMessage: (content: string) => Promise<void>;
   onToggleReaction: (messageId: string, icon: string) => void;
-  onStartCall: (mode: 'audio' | 'video') => void;
-  activeCallMode: CallMode;
   onToggleDrawer: () => void;
   onOpenContextDrawer: () => void;
+  onOpenMessageSearch: () => void;
+  highlightedMessageId?: string | null;
+  loading?: boolean;
+  onEditMessage: (message: Message, content: string) => Promise<void>;
+  onDeleteMessage: (message: Message) => Promise<void>;
+  onPinMessage: (message: Message, isPinned: boolean) => Promise<void>;
+  pinnedMessages?: Message[];
+  actionMessage: Message | null;
+  onActionMessageChanged: (message: Message | null) => void;
+  pinnedLoading?: boolean;
+  pageRevision: number;
+  pinPageRevision: number;
+  archive: boolean;
+  pinsArchive: boolean;
+  hasOlder: boolean;
+  hasNewer: boolean;
+  hasOlderPins: boolean;
+  hasNewerPins: boolean;
+  onNavigateHistory: (
+    direction: "earlier" | "newer" | "latest",
+    pinned: boolean,
+  ) => void;
+  onPinnedViewChanged: (pinned: boolean) => void;
 }
-
+const keyExtractor = (item: Message) => item.id;
 export const MobileChatView: React.FC<MobileChatViewProps> = ({
   channel,
   messages,
-  currentUser,
+  teamMembers,
   onSendMessage,
   onToggleReaction,
-  onStartCall,
-  activeCallMode,
   onToggleDrawer,
   onOpenContextDrawer,
+  onOpenMessageSearch,
+  highlightedMessageId,
+  loading = false,
+  archive,
+  pinsArchive,
+  pageRevision,
+  pinPageRevision,
+  hasOlder,
+  hasNewer,
+  hasOlderPins,
+  hasNewerPins,
+  onNavigateHistory,
+  onPinnedViewChanged,
+  onEditMessage,
+  onDeleteMessage,
+  onPinMessage,
+  pinnedMessages = [],
+  actionMessage,
+  onActionMessageChanged,
+  pinnedLoading = false,
 }) => {
-  const [inputText, setInputText] = useState('');
-  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
-  const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
-  const flatListRef = useRef<FlatList>(null);
-  const timerRef = useRef<any>(null);
-
+  const BrutalColors = useBrutalTheme();
+  const styles = useBrutalStyles(createStyles);
+  const [inputText, setInputText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
+  const [showPinned, setShowPinned] = useState(false);
+  const sendInFlight = useRef(false);
+  const flatListRef = useRef<FlatList<Message>>(null);
+  const nearBottom = useRef(true);
+  const reduceMotion = useReducedMotion();
+  const lastMessage = useRef<string | undefined>(undefined);
+  const focusRetries = useRef(0);
+  const focusedPage = useRef("");
+  const focusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const displayedMessages = showPinned ? pinnedMessages : messages;
+  const reversedMessages = useMemo(
+    () => [...displayedMessages].reverse(),
+    [displayedMessages],
+  );
+  const profiles = useMemo(
+    () => new Map(teamMembers.map((member) => [member.id, member])),
+    [teamMembers],
+  );
+  const selectedMessage = actionMessage;
+  const actionLookup = useRef(new Map<string, Message>());
   useEffect(() => {
-    if (isRecordingVoice) {
-      setRecordingSeconds(0);
-      timerRef.current = setInterval(() => {
-        setRecordingSeconds((s) => s + 1);
-      }, 1000);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
+    actionLookup.current = new Map(
+      [...messages, ...pinnedMessages].map((message) => [message.id, message]),
+    );
+  }, [messages, pinnedMessages]);
+  const openActions = useCallback(
+    (id: string) => {
+      const message = actionLookup.current.get(id);
+      if (message) onActionMessageChanged(message);
+    },
+    [onActionMessageChanged],
+  );
+  const renderMessageItem = useCallback(
+    ({ item }: { item: Message }) => (
+      <MessageRow
+        item={item}
+        sender={profiles.get(item.sender.id) || item.sender}
+        onToggleReaction={onToggleReaction}
+        onOpenActions={openActions}
+        highlighted={item.id === highlightedMessageId}
+      />
+    ),
+    [onToggleReaction, profiles, openActions, highlightedMessageId],
+  );
+  useEffect(() => {
+    focusRetries.current = 0;
+    if (!showPinned && highlightedMessageId && !loading) {
+      const focusKey = `${highlightedMessageId}:${pageRevision}`;
+      if (focusedPage.current === focusKey) return;
+      const index = reversedMessages.findIndex(
+        (message) => message.id === highlightedMessageId,
+      );
+      if (index >= 0) {
+        focusedPage.current = focusKey;
+        nearBottom.current = false;
+        flatListRef.current?.scrollToIndex({
+          index,
+          animated: false,
+          viewPosition: 0.5,
+        });
+      }
     }
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (focusTimer.current) clearTimeout(focusTimer.current);
     };
-  }, [isRecordingVoice]);
-
-  const handleSend = () => {
-    if (!inputText.trim()) return;
-    onSendMessage(inputText.trim());
-    setInputText('');
-  };
-
-  const handleFinishVoiceRecord = () => {
-    const mins = Math.floor(recordingSeconds / 60);
-    const secs = recordingSeconds % 60;
-    const duration = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-    const waveform = Array.from({ length: 20 }, () => Math.floor(Math.random() * 70) + 20);
-    onSendMessage('Voice Note', { duration, waveform });
-    setIsRecordingVoice(false);
-  };
-
-  const handleCancelVoiceRecord = () => {
-    setIsRecordingVoice(false);
-    setRecordingSeconds(0);
-  };
-
-  const formatSecs = (sec: number) => {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
-  };
-
-  const pinnedMessages = messages.filter((m) => m.isPinned);
-
-  const renderMessageItem = ({ item }: { item: Message }) => {
-    const isMe = item.sender.id === currentUser.id;
-
-    return (
-      <View style={styles.messageItem}>
-        <MonogramAvatar
-          monogram={item.sender.monogram || 'SJ'}
-          backgroundColor={item.sender.avatarColor || BrutalColors.accentYellow}
-          size={36}
-          status={item.sender.status}
-        />
-
-        <View style={styles.messageContent}>
-          {/* Header row */}
-          <View style={styles.senderHeader}>
-            <Text style={styles.senderName}>{item.sender.name}</Text>
-            <View style={styles.roleBadge}>
-              <Text style={styles.roleText}>{item.sender.role || 'Member'}</Text>
-            </View>
-            <Text style={styles.timestamp}>{item.timestamp}</Text>
-          </View>
-
-          {/* Text Content */}
-          {item.content && (
-            <Text style={styles.messageText}>{item.content}</Text>
-          )}
-
-          {/* Code Snippet */}
-          {item.codeSnippet && (
-            <View style={styles.codeSnippetCard}>
-              <View style={styles.codeSnippetHeader}>
-                <Text style={styles.codeSnippetLang}>
-                  {item.codeSnippet.language.toUpperCase()}
-                </Text>
-              </View>
-              <Text style={styles.codeSnippetContent}>
-                {item.codeSnippet.code}
-              </Text>
-            </View>
-          )}
-
-          {/* Voice Note Player */}
-          {item.voiceNote && (
-            <Pressable
-              onPress={() =>
-                setPlayingVoiceId(playingVoiceId === item.id ? null : item.id)
-              }
-              style={styles.voiceNoteCard}
-            >
-              <View style={styles.voicePlayBtn}>
-                <Text style={styles.voicePlayBtnText}>
-                  {playingVoiceId === item.id ? '⏸' : '▶'}
-                </Text>
-              </View>
-              <View style={styles.waveformContainer}>
-                {item.voiceNote.waveform.map((bar, i) => (
-                  <View
-                    key={i}
-                    style={[
-                      styles.waveBar,
-                      {
-                        height: Math.max(6, Math.floor(bar * 0.35)),
-                        backgroundColor:
-                          playingVoiceId === item.id && i < 10
-                            ? BrutalColors.accentGreen
-                            : BrutalColors.ink,
-                      },
-                    ]}
-                  />
-                ))}
-              </View>
-              <View style={styles.voiceDurationBadge}>
-                <Text style={styles.voiceDurationText}>
-                  {item.voiceNote.duration}
-                </Text>
-              </View>
-            </Pressable>
-          )}
-
-          {/* Reactions */}
-          <View style={styles.reactionsRow}>
-            {item.reactions?.map((reaction) => (
-              <Pressable
-                key={reaction.icon}
-                onPress={() => onToggleReaction(item.id, reaction.icon)}
-                style={[
-                  styles.reactionPill,
-                  reaction.reactedByMe && styles.reactionPillActive,
-                ]}
-              >
-                <Text style={styles.reactionIcon}>
-                  {reaction.icon === 'sparkle'
-                    ? '✦'
-                    : reaction.icon === 'check'
-                    ? '✓'
-                    : reaction.icon === 'heart'
-                    ? '❤️'
-                    : reaction.icon}
-                </Text>
-                <Text
-                  style={[
-                    styles.reactionCount,
-                    reaction.reactedByMe && styles.reactionCountActive,
-                  ]}
-                >
-                  {reaction.count}
-                </Text>
-              </Pressable>
-            ))}
-
-            {/* Quick add reaction button */}
-            <Pressable
-              onPress={() => onToggleReaction(item.id, 'sparkle')}
-              style={styles.addReactionBtn}
-            >
-              <Text style={styles.addReactionText}>+ ✦</Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
-    );
+  }, [
+    highlightedMessageId,
+    pageRevision,
+    reversedMessages,
+    showPinned,
+    loading,
+  ]);
+  const handleSend = async () => {
+    if (!inputText.trim() || sendInFlight.current) return;
+    sendInFlight.current = true;
+    setSending(true);
+    setSendError("");
+    const content = inputText.trim();
+    try {
+      await onSendMessage(content);
+      setInputText("");
+      setShowPinned(false);
+      onPinnedViewChanged(false);
+      nearBottom.current = true;
+      flatListRef.current?.scrollToOffset({
+        offset: 0,
+        animated: !reduceMotion,
+      });
+    } catch (error: unknown) {
+      setSendError(
+        error instanceof Error
+          ? error.message
+          : "Message was not sent. Please try again.",
+      );
+    } finally {
+      sendInFlight.current = false;
+      setSending(false);
+    }
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["left", "right", "bottom"]}>
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        {/* ═══ CHANNEL HEADER ═══ */}
         <View style={styles.header}>
-          <Pressable onPress={onToggleDrawer} style={styles.menuBtn}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open workspace menu"
+            onPress={onToggleDrawer}
+            style={styles.menuBtn}
+            hitSlop={8}
+          >
             <Text style={styles.menuBtnText}>☰</Text>
           </Pressable>
-
           <View style={styles.channelMeta}>
             <View style={styles.channelTitleRow}>
-              <View
-                style={[
-                  styles.channelBadge,
-                  {
-                    backgroundColor:
-                      channel.type === 'video'
-                        ? BrutalColors.accentBlue
-                        : channel.type === 'audio'
-                        ? BrutalColors.accentPink
-                        : BrutalColors.accentYellow,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.channelBadgeText,
-                    channel.type !== 'text' && { color: '#FFFFFF' },
-                  ]}
-                >
-                  {channel.type === 'video' ? '▶' : channel.type === 'audio' ? '◉' : '#'}
-                </Text>
+              <View style={styles.channelBadge}>
+                <Text style={styles.channelBadgeText}>#</Text>
               </View>
               <Text style={styles.channelTitle} numberOfLines={1}>
                 {channel.name}
@@ -254,501 +225,421 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
               {channel.topic}
             </Text>
           </View>
-
-          {/* Action Call Controls */}
           <View style={styles.headerActions}>
             <Pressable
-              onPress={() => onStartCall('audio')}
-              style={[
-                styles.headerActionBtn,
-                activeCallMode === 'audio' && styles.headerActionBtnActive,
-              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Search message history"
+              onPress={onOpenMessageSearch}
+              style={styles.headerActionBtn}
+              hitSlop={8}
             >
-              <Text style={styles.headerActionIcon}>🎙️</Text>
+              <Text style={styles.headerActionIcon}>⌕</Text>
             </Pressable>
-
             <Pressable
-              onPress={() => onStartCall('video')}
-              style={[
-                styles.headerActionBtn,
-                activeCallMode === 'video' && styles.headerActionBtnActive,
-              ]}
+              accessibilityRole="button"
+              accessibilityLabel="View channel details"
+              onPress={onOpenContextDrawer}
+              style={styles.headerActionBtn}
+              hitSlop={8}
             >
-              <Text style={styles.headerActionIcon}>📹</Text>
-            </Pressable>
-
-            <Pressable onPress={onOpenContextDrawer} style={styles.headerActionBtn}>
-              <Text style={styles.headerActionIcon}>ℹ️</Text>
+              <Text style={styles.headerActionIcon}>ⓘ</Text>
             </Pressable>
           </View>
         </View>
-
-        {/* ═══ PINNED MESSAGE BANNER ═══ */}
-        {pinnedMessages.length > 0 && (
-          <View style={styles.pinnedBanner}>
-            <View style={styles.pinnedTag}>
-              <Text style={styles.pinnedTagText}>PINNED</Text>
-            </View>
-            <Text style={styles.pinnedText} numberOfLines={1}>
-              {pinnedMessages[0].content}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            showPinned ? "Back to conversation" : "Pinned messages"
+          }
+          onPress={() => {
+            setShowPinned((value) => !value);
+            onPinnedViewChanged(!showPinned);
+            nearBottom.current = true;
+          }}
+          style={styles.pinnedBanner}
+        >
+          <View style={styles.pinnedTag}>
+            <Text style={styles.pinnedTagText}>
+              {showPinned ? "BACK" : "PINNED"}
             </Text>
           </View>
-        )}
-
-        {/* ═══ MESSAGES STREAM ═══ */}
+          <Text style={styles.pinnedText} numberOfLines={1}>
+            {showPinned
+              ? "Back to conversation"
+              : `Pinned messages · ${pinnedMessages.length}${hasOlderPins ? "+" : ""}`}
+          </Text>
+        </Pressable>
+        <View
+          style={{
+            padding: 10,
+            flexDirection: "row",
+            flexWrap: "wrap",
+            gap: 8,
+            borderBottomWidth: 2,
+            borderColor: BrutalColors.border,
+          }}
+        >
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              showPinned ? "Earlier pins" : "Earlier messages"
+            }
+            disabled={
+              (showPinned ? pinnedLoading : loading) ||
+              !(showPinned ? hasOlderPins : hasOlder)
+            }
+            onPress={() => {
+              nearBottom.current = true;
+              onNavigateHistory("earlier", showPinned);
+            }}
+            style={[
+              styles.historyButton,
+              !(showPinned ? hasOlderPins : hasOlder) && { opacity: 0.4 },
+            ]}
+          >
+            <Text style={styles.messageText}>
+              {showPinned ? "Earlier pins" : "Earlier messages"}
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={showPinned ? "Newer pins" : "Newer messages"}
+            disabled={
+              (showPinned ? pinnedLoading : loading) ||
+              !(showPinned ? hasNewerPins : hasNewer)
+            }
+            onPress={() => {
+              nearBottom.current = true;
+              onNavigateHistory("newer", showPinned);
+            }}
+            style={[
+              styles.historyButton,
+              !(showPinned ? hasNewerPins : hasNewer) && { opacity: 0.4 },
+            ]}
+          >
+            <Text style={styles.messageText}>
+              {showPinned ? "Newer pins" : "Newer messages"}
+            </Text>
+          </Pressable>
+          {(showPinned ? pinsArchive || hasNewerPins : archive || hasNewer) && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                showPinned ? "Latest pins" : "Latest messages"
+              }
+              disabled={showPinned ? pinnedLoading : loading}
+              onPress={() => {
+                nearBottom.current = true;
+                onNavigateHistory("latest", showPinned);
+              }}
+              style={styles.historyButton}
+            >
+              <Text style={styles.messageText}>
+                {showPinned ? "Latest pins" : "Latest messages"}
+              </Text>
+            </Pressable>
+          )}
+        </View>
         <FlatList
+          key={
+            showPinned
+              ? `pinned:${pinPageRevision}`
+              : `conversation:${pageRevision}`
+          }
           ref={flatListRef}
-          data={messages}
-          keyExtractor={(item) => item.id}
+          inverted
+          data={reversedMessages}
+          keyExtractor={keyExtractor}
           renderItem={renderMessageItem}
           contentContainerStyle={styles.messagesList}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+          onScrollToIndexFailed={(info) => {
+            if (focusRetries.current >= 2) return;
+            focusRetries.current += 1;
+            flatListRef.current?.scrollToOffset({
+              offset: Math.max(0, info.averageItemLength * info.index),
+              animated: false,
+            });
+            if (focusTimer.current) clearTimeout(focusTimer.current);
+            focusTimer.current = setTimeout(() => {
+              flatListRef.current?.scrollToIndex({
+                index: info.index,
+                animated: false,
+                viewPosition: 0.5,
+              });
+            }, 100);
+          }}
+          initialNumToRender={16}
+          maxToRenderPerBatch={10}
+          windowSize={7}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          ListEmptyComponent={
+            <View style={{ padding: 24 }}>
+              {(showPinned ? pinnedLoading : loading) ? (
+                <ActivityIndicator color={BrutalColors.ink} />
+              ) : (
+                <Text style={styles.messageText}>
+                  {showPinned
+                    ? "No pinned messages."
+                    : "No messages yet. Start the conversation."}
+                </Text>
+              )}
+            </View>
+          }
+          onScroll={(event) => {
+            nearBottom.current = event.nativeEvent.contentOffset.y < 100;
+          }}
+          scrollEventThrottle={64}
+          onContentSizeChange={() => {
+            const next = displayedMessages.at(-1)?.id;
+            if (next !== lastMessage.current && nearBottom.current)
+              flatListRef.current?.scrollToOffset({
+                offset: 0,
+                animated: !reduceMotion,
+              });
+            lastMessage.current = next;
+          }}
         />
-
-        {/* ═══ INPUT BAR DOCK ═══ */}
-        {isRecordingVoice ? (
-          <View style={styles.voiceRecordDock}>
-            <View style={styles.recordingDot} />
-            <Text style={styles.recordingTimerText}>
-              RECORDING: {formatSecs(recordingSeconds)}
-            </Text>
-            <Pressable onPress={handleCancelVoiceRecord} style={styles.voiceCancelBtn}>
-              <Text style={styles.voiceCancelBtnText}>CANCEL</Text>
-            </Pressable>
-            <Pressable onPress={handleFinishVoiceRecord} style={styles.voiceFinishBtn}>
-              <Text style={styles.voiceFinishBtnText}>DONE ✓</Text>
+        {sendError ? (
+          <Text
+            accessibilityRole="alert"
+            style={{
+              padding: 12,
+              color: "#1A1A1A",
+              backgroundColor: "#FFE0E9",
+            }}
+          >
+            {sendError}
+          </Text>
+        ) : null}
+        {channel.type === "text" ? (
+          <View style={styles.inputDock}>
+            <BrutalInput
+              accessibilityLabel="Message"
+              value={inputText}
+              editable={!sending}
+              onChangeText={setInputText}
+              placeholder={`Message #${channel.name}...`}
+              maxLength={10000}
+              style={styles.chatInput}
+              onSubmitEditing={() => {
+                void handleSend();
+              }}
+              returnKeyType="send"
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Send message"
+              accessibilityState={{
+                disabled: sending || !inputText.trim(),
+                busy: sending,
+              }}
+              disabled={sending || !inputText.trim()}
+              onPress={() => {
+                void handleSend();
+              }}
+              style={[
+                styles.sendBtn,
+                (sending || !inputText.trim()) && { opacity: 0.5 },
+              ]}
+            >
+              {sending ? (
+                <ActivityIndicator color={BrutalColors.ink} />
+              ) : (
+                <Text style={styles.sendBtnText}>→</Text>
+              )}
             </Pressable>
           </View>
         ) : (
-          <View style={styles.inputDock}>
-            <BrutalInput
-              value={inputText}
-              onChangeText={setInputText}
-              placeholder={`Message #${channel.name}...`}
-              style={styles.chatInput}
-              onSubmitEditing={handleSend}
-              returnKeyType="send"
-            />
-
-            <Pressable
-              onPress={() => setIsRecordingVoice(true)}
-              style={styles.micBtn}
-            >
-              <Text style={styles.micBtnText}>🎙️</Text>
-            </Pressable>
-
-            <Pressable onPress={handleSend} style={styles.sendBtn}>
-              <Text style={styles.sendBtnText}>→</Text>
-            </Pressable>
-          </View>
+          <Text style={[styles.messageText, { padding: 16 }]}>
+            Live audio and video are unavailable until the calling service is
+            configured. Choose a text channel to send messages.
+          </Text>
         )}
       </KeyboardAvoidingView>
+      {selectedMessage && (
+        <MessageActionsModal
+          message={selectedMessage}
+          permissions={{
+            edit: selectedMessage.canEdit,
+            delete: selectedMessage.canDelete,
+            pin: selectedMessage.canPin,
+          }}
+          onClose={() => onActionMessageChanged(null)}
+          onEdit={onEditMessage}
+          onDelete={onDeleteMessage}
+          onPin={onPinMessage}
+        />
+      )}
     </SafeAreaView>
   );
 };
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: BrutalColors.bgPaper,
-  },
-  container: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: BrutalColors.bgCard,
-    borderBottomWidth: 3,
-    borderBottomColor: BrutalColors.border,
-    gap: 10,
-  },
-  menuBtn: {
-    width: 36,
-    height: 36,
-    borderWidth: 2.5,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
-    backgroundColor: BrutalColors.accentYellow,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  menuBtnText: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: BrutalColors.ink,
-  },
-  channelMeta: {
-    flex: 1,
-  },
-  channelTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  channelBadge: {
-    width: 20,
-    height: 20,
-    borderWidth: 2,
-    borderColor: BrutalColors.border,
-    borderRadius: 3,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  channelBadgeText: {
-    fontFamily: Fonts?.mono,
-    fontWeight: '900',
-    fontSize: 11,
-    color: BrutalColors.ink,
-  },
-  channelTitle: {
-    fontFamily: Fonts?.sans,
-    fontWeight: '900',
-    fontSize: 16,
-    color: BrutalColors.ink,
-  },
-  channelTopic: {
-    fontFamily: Fonts?.sans,
-    fontSize: 11,
-    color: BrutalColors.inkMuted,
-    fontWeight: '500',
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  headerActionBtn: {
-    width: 34,
-    height: 34,
-    borderWidth: 2,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
-    backgroundColor: BrutalColors.bgCardAlt,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerActionBtnActive: {
-    backgroundColor: BrutalColors.accentGreen,
-  },
-  headerActionIcon: {
-    fontSize: 14,
-  },
-  pinnedBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: BrutalColors.bgCardAlt,
-    borderBottomWidth: 2,
-    borderBottomColor: BrutalColors.border,
-  },
-  pinnedTag: {
-    borderWidth: 1.5,
-    borderColor: BrutalColors.border,
-    borderRadius: 3,
-    backgroundColor: BrutalColors.accentYellow,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-  },
-  pinnedTagText: {
-    fontFamily: Fonts?.mono,
-    fontSize: 9,
-    fontWeight: '900',
-    color: BrutalColors.ink,
-  },
-  pinnedText: {
-    flex: 1,
-    fontFamily: Fonts?.sans,
-    fontSize: 11,
-    fontWeight: '600',
-    color: BrutalColors.inkSecondary,
-  },
-  messagesList: {
-    padding: 14,
-    gap: 14,
-  },
-  messageItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  messageContent: {
-    flex: 1,
-    backgroundColor: BrutalColors.bgCard,
-    borderWidth: 2.5,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
-    padding: 12,
-    gap: 8,
-    ...Platform.select({
-      web: {
-        boxShadow: `2px 2px 0px ${BrutalColors.border}`,
-      },
-      default: {
-        shadowColor: BrutalColors.border,
-        shadowOffset: { width: 2, height: 2 },
-        shadowOpacity: 1,
-        shadowRadius: 0,
-        elevation: 2,
-      },
-    }),
-  },
-  senderHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  senderName: {
-    fontFamily: Fonts?.sans,
-    fontWeight: '900',
-    fontSize: 13,
-    color: BrutalColors.ink,
-  },
-  roleBadge: {
-    borderWidth: 1.5,
-    borderColor: BrutalColors.border,
-    borderRadius: 3,
-    backgroundColor: BrutalColors.bgCardAlt,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-  },
-  roleText: {
-    fontFamily: Fonts?.mono,
-    fontSize: 9,
-    fontWeight: '800',
-    color: BrutalColors.inkSecondary,
-  },
-  timestamp: {
-    fontFamily: Fonts?.mono,
-    fontSize: 10,
-    color: BrutalColors.inkMuted,
-    marginLeft: 'auto',
-  },
-  messageText: {
-    fontFamily: Fonts?.sans,
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: '500',
-    color: BrutalColors.ink,
-  },
-  codeSnippetCard: {
-    backgroundColor: BrutalColors.ink,
-    borderWidth: 2,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
-    padding: 10,
-    gap: 6,
-  },
-  codeSnippetHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  codeSnippetLang: {
-    fontFamily: Fonts?.mono,
-    fontSize: 9,
-    fontWeight: '800',
-    color: BrutalColors.accentYellow,
-  },
-  codeSnippetContent: {
-    fontFamily: Fonts?.mono,
-    fontSize: 12,
-    color: '#FFFFFF',
-    lineHeight: 18,
-  },
-  voiceNoteCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: BrutalColors.bgCardAlt,
-    borderWidth: 2,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
-    padding: 10,
-  },
-  voicePlayBtn: {
-    width: 28,
-    height: 28,
-    borderWidth: 2,
-    borderColor: BrutalColors.border,
-    borderRadius: 14,
-    backgroundColor: BrutalColors.accentYellow,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  voicePlayBtnText: {
-    fontSize: 11,
-    fontWeight: '900',
-  },
-  waveformContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    height: 28,
-  },
-  waveBar: {
-    width: 3,
-    borderRadius: 1.5,
-  },
-  voiceDurationBadge: {
-    borderWidth: 1.5,
-    borderColor: BrutalColors.border,
-    borderRadius: 3,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-  },
-  voiceDurationText: {
-    fontFamily: Fonts?.mono,
-    fontSize: 10,
-    fontWeight: '800',
-    color: BrutalColors.ink,
-  },
-  reactionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flexWrap: 'wrap',
-    marginTop: 2,
-  },
-  reactionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    borderWidth: 1.5,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
-    backgroundColor: BrutalColors.bgCardAlt,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-  },
-  reactionPillActive: {
-    backgroundColor: BrutalColors.accentYellow,
-    borderWidth: 2,
-  },
-  reactionIcon: {
-    fontSize: 11,
-  },
-  reactionCount: {
-    fontFamily: Fonts?.mono,
-    fontSize: 10,
-    fontWeight: '800',
-    color: BrutalColors.ink,
-  },
-  reactionCountActive: {
-    fontWeight: '900',
-  },
-  addReactionBtn: {
-    borderWidth: 1.5,
-    borderColor: BrutalColors.inkFaint,
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    backgroundColor: 'transparent',
-  },
-  addReactionText: {
-    fontFamily: Fonts?.mono,
-    fontSize: 10,
-    fontWeight: '700',
-    color: BrutalColors.inkMuted,
-  },
-  inputDock: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: BrutalColors.bgCard,
-    borderTopWidth: 3,
-    borderTopColor: BrutalColors.border,
-    gap: 8,
-  },
-  chatInput: {
-    flex: 1,
-    paddingVertical: 10,
-  },
-  micBtn: {
-    width: 44,
-    height: 44,
-    borderWidth: 2.5,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
-    backgroundColor: BrutalColors.bgCardAlt,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  micBtnText: {
-    fontSize: 18,
-  },
-  sendBtn: {
-    width: 44,
-    height: 44,
-    borderWidth: 2.5,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
-    backgroundColor: BrutalColors.accentYellow,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendBtnText: {
-    fontFamily: Fonts?.mono,
-    fontSize: 20,
-    fontWeight: '900',
-    color: BrutalColors.ink,
-  },
-  voiceRecordDock: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    backgroundColor: '#FFF0F3',
-    borderTopWidth: 3,
-    borderTopColor: BrutalColors.accentPink,
-    gap: 12,
-  },
-  recordingDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: BrutalColors.accentPink,
-  },
-  recordingTimerText: {
-    flex: 1,
-    fontFamily: Fonts?.mono,
-    fontSize: 12,
-    fontWeight: '800',
-    color: BrutalColors.accentPink,
-  },
-  voiceCancelBtn: {
-    borderWidth: 2,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  voiceCancelBtnText: {
-    fontFamily: Fonts?.mono,
-    fontSize: 11,
-    fontWeight: '800',
-    color: BrutalColors.ink,
-  },
-  voiceFinishBtn: {
-    borderWidth: 2,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
-    backgroundColor: BrutalColors.accentGreen,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  voiceFinishBtnText: {
-    fontFamily: Fonts?.mono,
-    fontSize: 11,
-    fontWeight: '800',
-    color: BrutalColors.ink,
-  },
-});
+const createStyles = (BrutalColors: BrutalPalette) =>
+  StyleSheet.create({
+    historyButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      minHeight: 44,
+      borderWidth: 2,
+      borderColor: BrutalColors.border,
+      backgroundColor: BrutalColors.bgCard,
+    },
+    safeArea: {
+      flex: 1,
+      backgroundColor: BrutalColors.bgPaper,
+    },
+    container: {
+      flex: 1,
+    },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      backgroundColor: BrutalColors.bgCard,
+      borderBottomWidth: 3,
+      borderBottomColor: BrutalColors.border,
+      gap: 10,
+    },
+    menuBtn: {
+      width: 36,
+      height: 36,
+      borderWidth: 2.5,
+      borderColor: BrutalColors.border,
+      borderRadius: 4,
+      backgroundColor: BrutalColors.accentYellow,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    menuBtnText: {
+      fontSize: 16,
+      fontWeight: "900",
+      color: "#1A1A1A",
+    },
+    channelMeta: {
+      flex: 1,
+    },
+    channelTitleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    channelBadge: {
+      width: 20,
+      height: 20,
+      borderWidth: 2,
+      borderColor: BrutalColors.border,
+      borderRadius: 3,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    channelBadgeText: {
+      fontFamily: Fonts?.mono,
+      fontWeight: "900",
+      fontSize: 11,
+      color: BrutalColors.ink,
+    },
+    channelTitle: {
+      fontFamily: Fonts?.sans,
+      fontWeight: "900",
+      fontSize: 16,
+      color: BrutalColors.ink,
+    },
+    channelTopic: {
+      fontFamily: Fonts?.sans,
+      fontSize: 11,
+      color: BrutalColors.inkMuted,
+      fontWeight: "500",
+    },
+    headerActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    headerActionBtn: {
+      width: 34,
+      height: 34,
+      borderWidth: 2,
+      borderColor: BrutalColors.border,
+      borderRadius: 4,
+      backgroundColor: BrutalColors.bgCardAlt,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    headerActionIcon: {
+      fontSize: 14,
+    },
+    pinnedBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      backgroundColor: BrutalColors.bgCardAlt,
+      borderBottomWidth: 2,
+      borderBottomColor: BrutalColors.border,
+    },
+    pinnedTag: {
+      borderWidth: 1.5,
+      borderColor: BrutalColors.border,
+      borderRadius: 3,
+      backgroundColor: BrutalColors.accentYellow,
+      paddingHorizontal: 5,
+      paddingVertical: 1,
+    },
+    pinnedTagText: {
+      fontFamily: Fonts?.mono,
+      fontSize: 9,
+      fontWeight: "900",
+      color: "#1A1A1A",
+    },
+    pinnedText: {
+      flex: 1,
+      fontFamily: Fonts?.sans,
+      fontSize: 11,
+      fontWeight: "600",
+      color: BrutalColors.inkSecondary,
+    },
+    messagesList: {
+      padding: 14,
+      gap: 14,
+    },
+    messageText: {
+      fontFamily: Fonts?.sans,
+      fontSize: 14,
+      lineHeight: 20,
+      fontWeight: "500",
+      color: BrutalColors.ink,
+    },
+    inputDock: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      backgroundColor: BrutalColors.bgCard,
+      borderTopWidth: 3,
+      borderTopColor: BrutalColors.border,
+      gap: 8,
+    },
+    chatInput: {
+      flex: 1,
+      paddingVertical: 10,
+    },
+    sendBtn: {
+      width: 44,
+      height: 44,
+      borderWidth: 2.5,
+      borderColor: BrutalColors.border,
+      borderRadius: 4,
+      backgroundColor: BrutalColors.accentYellow,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    sendBtnText: {
+      fontFamily: Fonts?.mono,
+      fontSize: 20,
+      fontWeight: "900",
+      color: "#1A1A1A",
+    },
+  });

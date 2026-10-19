@@ -1,46 +1,43 @@
-import { Router, Request, Response } from 'express';
-import { prisma } from '../lib/prisma.js';
+/** Persist account preferences; legacy media settings remain for existing client compatibility. */
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../lib/prisma.js";
+import { AuthRequest } from "../lib/auth.js";
+import { asyncRoute, parse } from "../lib/http.js";
 
 export const settingsRouter = Router();
-
-// GET /api/settings
-settingsRouter.get('/', async (_req: Request, res: Response) => {
-  try {
-    let setting = await prisma.workspaceSetting.findUnique({
-      where: { id: 'default_settings' },
+const settingsSchema = z
+  .object({
+    micDeviceId: z.string().min(1).max(256).optional(),
+    cameraDeviceId: z.string().min(1).max(256).optional(),
+    speakerDeviceId: z.string().min(1).max(256).optional(),
+    noiseCancellation: z.boolean().optional(),
+    spatialAudio: z.boolean().optional(),
+    theme: z.enum(["light", "dark"]).optional(),
+    inputVolume: z.number().int().min(0).max(100).optional(),
+    outputVolume: z.number().int().min(0).max(100).optional(),
+  })
+  .strict();
+settingsRouter.get(
+  "/",
+  asyncRoute(async (req: AuthRequest, res) => {
+    const setting = await prisma.workspaceSetting.upsert({
+      where: { userId: req.auth!.userId },
+      create: { userId: req.auth!.userId },
+      update: {},
     });
-
-    if (!setting) {
-      setting = await prisma.workspaceSetting.create({
-        data: { id: 'default_settings' },
-      });
-    }
-
     res.json({ data: setting });
-  } catch (err) {
-    console.error('Failed to fetch settings:', err);
-    res.status(500).json({ error: 'Failed to fetch settings' });
-  }
-});
-
-// PUT /api/settings
-settingsRouter.put('/', async (req: Request, res: Response) => {
-  try {
+  }),
+);
+settingsRouter.put(
+  "/",
+  asyncRoute(async (req: AuthRequest, res) => {
+    const data = parse(settingsSchema, req.body);
     const updated = await prisma.workspaceSetting.upsert({
-      where: { id: 'default_settings' },
-      update: req.body,
-      create: {
-        id: 'default_settings',
-        ...req.body,
-      },
+      where: { userId: req.auth!.userId },
+      update: data,
+      create: { userId: req.auth!.userId, ...data },
     });
-
-    res.json({
-      data: updated,
-      message: 'Settings updated',
-    });
-  } catch (err) {
-    console.error('Failed to update settings:', err);
-    res.status(500).json({ error: 'Failed to update settings' });
-  }
-});
+    res.json({ data: updated });
+  }),
+);

@@ -1,207 +1,291 @@
-import { Router, Request, Response } from 'express';
-import { Prisma } from '@prisma/client';
-import { prisma } from '../lib/prisma.js';
-import { AuthRequest } from '../lib/auth.js';
+/** Validate message HTTP inputs and delegate consistent reads and transactional mutations. */
+import { Router } from "express";
+import { createHash } from "node:crypto";
+import { Prisma } from "@prisma/client";
+import { z } from "zod";
+import { prisma } from "../lib/prisma.js";
+import { AuthRequest } from "../lib/auth.js";
+import { asyncRoute, HttpError, parse } from "../lib/http.js";
+import {
+  accessibleChannel,
+  channelScope,
+  lockChannel,
+  workspaceActor,
+} from "../lib/access.js";
+import {
+  formatMessage,
+  formatMessages,
+  messageInclude,
+  reactionIcons,
+} from "../lib/messages.js";
+import { messagePage } from "../lib/messageHistory.js";
+import { mutateMessage } from "../lib/messageMutations.js";
+import { searchMessages } from "../lib/search.js";
 
 export const messagesRouter = Router();
-
-type MessageWithRelations = Prisma.MessageGetPayload<{
-  include: {
-    sender: true;
-    reactions: true;
-  };
-}>;
-
-function formatMessage(m: MessageWithRelations, currentUserId: string) {
-  const reactionCounts: Record<string, { icon: string; count: number; reactedByMe: boolean }> = {};
-  for (const r of m.reactions) {
-    if (!reactionCounts[r.icon]) {
-      reactionCounts[r.icon] = { icon: r.icon, count: 0, reactedByMe: false };
-    }
-    reactionCounts[r.icon].count += 1;
-    if (r.userId === currentUserId) {
-      reactionCounts[r.icon].reactedByMe = true;
-    }
-  }
-
-  return {
-    id: m.id,
-    channelId: m.channelId,
-    sender: {
-      id: m.sender.id,
-      name: m.sender.name,
-      handle: m.sender.handle,
-      monogram: m.sender.monogram,
-      role: m.sender.role,
-      status: m.sender.status,
-      statusText: m.sender.statusText,
-      avatarColor: m.sender.avatarColor,
-    },
-    timestamp: m.timestamp,
-    content: m.content,
-    voiceNote: m.voiceNote,
-    codeSnippet: m.codeSnippet,
-    attachments: m.attachments,
-    isPinned: m.isPinned,
-    reactions: Object.values(reactionCounts),
-  };
-}
-
-// GET /api/messages/:channelId
-messagesRouter.get('/:channelId', async (req: Request, res: Response) => {
-  const { channelId } = req.params;
-  const authReq = req as AuthRequest;
-  const currentUserId = authReq.auth?.userId || '';
-
-  try {
-    const dbMessages = await prisma.message.findMany({
-      where: { channelId },
-      include: {
-        sender: true,
-        reactions: true,
+const codeSchema = z
+  .object({
+    language: z.string().min(1).max(40),
+    code: z.string().min(1).max(20000),
+  })
+  .strict();
+const versionSchema = z.number().int().min(1).max(2147483647);
+messagesRouter.get(
+  "/search",
+  asyncRoute(async (req: AuthRequest, res) => {
+    res.json(await searchMessages(req));
+  }),
+);
+messagesRouter.get(
+  "/:channelId/changes",
+  asyncRoute(async (req: AuthRequest, res) => {
+    const { after, limit } = parse(
+      z
+        .object({
+          after: z
+            .string()
+            .refine(
+              (value) =>
+                /^\d{1,19}$/.test(value) &&
+                BigInt(value) <= 9223372036854775807n,
+              "Invalid change cursor",
+            )
+            .default("0"),
+          limit: z.coerce.number().int().min(1).max(100).default(100),
+        })
+        .strict(),
+      req.query,
+    );
+    const result = await prisma.$transaction(
+      async (tx) => {
+        await accessibleChannel(req, req.params.channelId, tx);
+        req.auth!.workspaceRole = (
+          await workspaceActor(tx, req, req.auth!.workspaceId!)
+        ).role;
+        const checkpoint = await tx.messageChange.aggregate({
+          where: { channelId: req.params.channelId },
+          _max: { sequence: true },
+        });
+        if (BigInt(after) > (checkpoint._max.sequence || 0n))
+          throw new HttpError(
+            409,
+            "Change cursor is invalid for this channel; reload history",
+          );
+        const rows = await tx.messageChange.findMany({
+          where: {
+            channelId: req.params.channelId,
+            sequence: { gt: BigInt(after) },
+          },
+          orderBy: { sequence: "asc" },
+          take: limit + 1,
+          select: { sequence: true, messageId: true },
+        });
+        const page = rows.slice(0, limit);
+        const ids = [...new Set(page.map((row) => row.messageId))];
+        const messages = ids.length
+          ? await tx.message.findMany({
+              where: { channelId: req.params.channelId, id: { in: ids } },
+              include: messageInclude,
+            })
+          : [];
+        const byId = new Map(messages.map((message) => [message.id, message]));
+        return {
+          channelId: req.params.channelId,
+          data: await formatMessages(
+            ids.map((id) => byId.get(id)!),
+            req,
+            tx,
+          ),
+          changeCursor: (page.at(-1)?.sequence || BigInt(after)).toString(),
+          hasMore: rows.length > limit,
+        };
       },
-      orderBy: { createdAt: 'asc' },
-    });
-
-    const formatted = dbMessages.map((m) => formatMessage(m, currentUserId));
-
-    res.json({
-      channelId,
-      data: formatted,
-      total: formatted.length,
-    });
-  } catch (err) {
-    console.error('Failed to fetch messages:', err);
-    res.status(500).json({ error: 'Failed to fetch messages' });
-  }
-});
-
-// GET /api/messages (all grouped by channel)
-messagesRouter.get('/', async (req: Request, res: Response) => {
-  const authReq = req as AuthRequest;
-  const currentUserId = authReq.auth?.userId || '';
-
-  try {
-    const channels = await prisma.channel.findMany({ select: { id: true } });
-    const result: Record<string, ReturnType<typeof formatMessage>[]> = {};
-
-    for (const ch of channels) {
-      const msgs = await prisma.message.findMany({
-        where: { channelId: ch.id },
-        include: { sender: true, reactions: true },
-        orderBy: { createdAt: 'asc' },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+    res.json(result);
+  }),
+);
+messagesRouter.get(
+  "/:channelId",
+  asyncRoute(async (req: AuthRequest, res) => {
+    res.json(await messagePage(req, req.params.channelId));
+  }),
+);
+messagesRouter.get(
+  "/",
+  asyncRoute(async (req: AuthRequest, res) => {
+    const data = await prisma.$transaction(
+      async (tx) => {
+        req.auth!.workspaceRole = (
+          await workspaceActor(tx, req, req.auth!.workspaceId!)
+        ).role;
+        const channels = await tx.channel.findMany({
+          where: channelScope(req),
+          select: {
+            id: true,
+            messages: {
+              include: messageInclude,
+              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+              take: 50,
+            },
+          },
+          take: 20,
+        });
+        const formatted = await formatMessages(
+          channels.flatMap((channel) => channel.messages),
+          req,
+          tx,
+        );
+        const byId = new Map(formatted.map((message) => [message.id, message]));
+        return Object.fromEntries(
+          channels.map((channel) => [
+            channel.id,
+            channel.messages.reverse().map((message) => byId.get(message.id)!),
+          ]),
+        );
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+    res.json({ data, bounded: true });
+  }),
+);
+const createSchema = z
+  .object({
+    channelId: z.string().min(1).max(128),
+    content: z.string().trim().max(10000).default(""),
+    codeSnippet: codeSchema.optional(),
+    clientMutationId: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9_-]+$/)
+      .optional(),
+    voiceNote: z.unknown().optional(),
+    attachments: z.unknown().optional(),
+  })
+  .strict();
+messagesRouter.post(
+  "/",
+  asyncRoute(async (req: AuthRequest, res) => {
+    const input = parse(createSchema, req.body);
+    if (input.voiceNote != null || input.attachments != null)
+      throw new HttpError(
+        501,
+        "Media storage and recording are not configured",
+      );
+    if (!input.content && !input.codeSnippet)
+      throw new HttpError(400, "Message content is required");
+    const fingerprint = createHash("sha256")
+      .update(
+        JSON.stringify({
+          content: input.content,
+          codeSnippet: input.codeSnippet || null,
+        }),
+      )
+      .digest("hex");
+    const result = await prisma.$transaction(async (tx) => {
+      await lockChannel(tx, input.channelId);
+      const channel = await tx.channel.findFirst({
+        where: { id: input.channelId, ...channelScope(req) },
       });
-      result[ch.id] = msgs.map((m) => formatMessage(m, currentUserId));
-    }
-
-    res.json({ data: result });
-  } catch (err) {
-    console.error('Failed to fetch all messages:', err);
-    res.status(500).json({ error: 'Failed to fetch messages' });
-  }
-});
-
-// POST /api/messages
-messagesRouter.post('/', async (req: Request, res: Response) => {
-  const authReq = req as AuthRequest;
-  const senderId = authReq.auth?.userId;
-  const { channelId, content, voiceNote, codeSnippet } = req.body;
-
-  if (!channelId || (!content && !voiceNote)) {
-    return res.status(400).json({ error: 'channelId and content or voiceNote are required' });
-  }
-
-  if (!senderId) {
-    return res.status(401).json({ error: 'Authentication required' });
-  }
-
-  try {
-    const now = new Date();
-    const hours = now.getHours();
-    const minutes = now.getMinutes();
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    const formattedHours = hours % 12 || 12;
-    const formattedMinutes = minutes < 10 ? `0${minutes}` : minutes;
-    const timestamp = `${formattedHours}:${formattedMinutes} ${ampm}`;
-
-    const msgId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-
-    const created = await prisma.message.create({
-      data: {
-        id: msgId,
-        channelId,
-        senderId,
-        timestamp,
-        content: content || '',
-        voiceNote: voiceNote as object | undefined,
-        codeSnippet: codeSnippet as object | undefined,
-      },
-      include: {
-        sender: true,
-        reactions: true,
-      },
-    });
-
-    res.status(201).json({
-      data: formatMessage(created, senderId),
-      message: 'Message created successfully',
-    });
-  } catch (err) {
-    console.error('Failed to create message:', err);
-    res.status(500).json({ error: 'Failed to create message' });
-  }
-});
-
-// POST /api/messages/:id/reactions
-messagesRouter.post('/:id/reactions', async (req: Request, res: Response) => {
-  const authReq = req as AuthRequest;
-  const userId = authReq.auth?.userId;
-  const { id } = req.params;
-  const { icon } = req.body;
-
-  if (!icon) {
-    return res.status(400).json({ error: 'Reaction icon is required' });
-  }
-
-  if (!userId) {
-    return res.status(401).json({ error: 'Authentication required' });
-  }
-
-  try {
-    const existing = await prisma.reaction.findUnique({
-      where: {
-        messageId_userId_icon: {
-          messageId: id,
-          userId,
-          icon,
+      if (!channel) throw new HttpError(404, "Channel not found");
+      req.auth!.workspaceRole = (
+        await workspaceActor(tx, req, channel.workspaceId)
+      ).role;
+      if (channel.type !== "text")
+        throw new HttpError(400, "Messages require a text channel");
+      if (input.clientMutationId) {
+        const existing = await tx.message.findUnique({
+          where: {
+            channelId_senderId_clientMutationId: {
+              channelId: input.channelId,
+              senderId: req.auth!.userId,
+              clientMutationId: input.clientMutationId,
+            },
+          },
+          include: messageInclude,
+        });
+        if (existing) {
+          if (existing.clientMutationHash !== fingerprint)
+            throw new HttpError(
+              409,
+              "This message request key was already used with different content",
+            );
+          return {
+            data: (await formatMessages([existing], req, tx))[0],
+            created: false,
+          };
+        }
+      }
+      const message = await tx.message.create({
+        data: {
+          channelId: input.channelId,
+          senderId: req.auth!.userId,
+          content: input.content,
+          ...(input.codeSnippet ? { codeSnippet: input.codeSnippet } : {}),
+          ...(input.clientMutationId
+            ? {
+                clientMutationId: input.clientMutationId,
+                clientMutationHash: fingerprint,
+              }
+            : {}),
         },
-      },
-    });
-
-    if (existing) {
-      await prisma.reaction.delete({ where: { id: existing.id } });
-    } else {
-      await prisma.reaction.create({
-        data: { messageId: id, userId, icon },
+        include: messageInclude,
       });
-    }
-
-    // Fetch updated message
-    const updated = await prisma.message.findUnique({
-      where: { id },
-      include: { sender: true, reactions: true },
+      await tx.messageChange.create({
+        data: { channelId: message.channelId, messageId: message.id },
+      });
+      return { data: formatMessage(message, req), created: true };
     });
+    res.status(result.created ? 201 : 200).json({ data: result.data });
+  }),
+);
 
-    if (!updated) {
-      return res.status(404).json({ error: 'Message not found' });
-    }
-
-    res.json({
-      data: formatMessage(updated, userId),
-      message: 'Reaction updated',
-    });
-  } catch (err) {
-    console.error('Failed to toggle reaction:', err);
-    res.status(500).json({ error: 'Failed to update reaction' });
-  }
-});
+messagesRouter.patch(
+  "/:id",
+  asyncRoute(async (req: AuthRequest, res) => {
+    const input = parse(
+      z
+        .object({
+          content: z.string().trim().max(10000),
+          expectedVersion: versionSchema,
+          codeSnippet: codeSchema.nullable().optional(),
+        })
+        .strict(),
+      req.body,
+    );
+    res.json({ data: await mutateMessage(req, { type: "edit", ...input }) });
+  }),
+);
+messagesRouter.delete(
+  "/:id",
+  asyncRoute(async (req: AuthRequest, res) => {
+    const input = parse(
+      z.object({ expectedVersion: versionSchema }).strict(),
+      req.body,
+    );
+    res.json({ data: await mutateMessage(req, { type: "delete", ...input }) });
+  }),
+);
+messagesRouter.put(
+  "/:id/pin",
+  asyncRoute(async (req: AuthRequest, res) => {
+    const input = parse(
+      z
+        .object({ isPinned: z.boolean(), expectedVersion: versionSchema })
+        .strict(),
+      req.body,
+    );
+    res.json({ data: await mutateMessage(req, { type: "pin", ...input }) });
+  }),
+);
+messagesRouter.post(
+  "/:id/reactions",
+  asyncRoute(async (req: AuthRequest, res) => {
+    const input = parse(
+      z.object({ icon: z.enum(reactionIcons) }).strict(),
+      req.body,
+    );
+    res.json({ data: await mutateMessage(req, { type: "react", ...input }) });
+  }),
+);

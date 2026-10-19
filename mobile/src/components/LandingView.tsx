@@ -1,56 +1,58 @@
-import React from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  SafeAreaView,
-  StatusBar,
-} from 'react-native';
-import { BrutalColors, Fonts } from '@/constants/theme';
-import { BrutalButton } from './brutal/BrutalButton';
-import { BrutalCard } from './brutal/BrutalCard';
-import { BrutalTag } from './brutal/BrutalTag';
+/** Public native introduction and entry into email/password authentication. */
+import React from "react";
+import { View, Text, ScrollView, StyleSheet, StatusBar } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { BrutalColors, Fonts } from "@/constants/theme";
+import { BrutalButton } from "./brutal/BrutalButton";
+import { BrutalCard } from "./brutal/BrutalCard";
+import { BrutalTag } from "./brutal/BrutalTag";
 
 interface LandingViewProps {
   onLogin: () => void;
   onSignUp: () => void;
 }
 
-export const LandingView: React.FC<LandingViewProps> = ({ onLogin, onSignUp }) => {
-  const avatars = ['SJ', 'ER', 'JT', 'SL', 'MC'];
-
+export const LandingView: React.FC<LandingViewProps> = ({
+  onLogin,
+  onSignUp,
+}) => {
   const features = [
     {
-      title: 'TEXT CHANNELS',
-      desc: 'Organized rooms for every topic. Pin messages. React with flair.',
+      title: "TEXT CHANNELS",
+      desc: "Organized rooms for every topic. Share messages and reactions with your team.",
       accent: BrutalColors.accentYellow,
-      icon: '#',
+      icon: "#",
     },
     {
-      title: 'VOICE HUDDLES',
-      desc: 'Drop in, talk, leave. Spatial audio that feels like being in the same room.',
+      title: "PRIVATE ROOMS",
+      desc: "Choose who can join the conversation, and manage membership in one place.",
       accent: BrutalColors.accentPink,
-      icon: '◉',
+      icon: "◉",
     },
     {
-      title: 'VIDEO SALONS',
-      desc: '1080p WebRTC. Screen share. Your camera or avatar — your call.',
+      title: "MESSAGE HISTORY",
+      desc: "Find earlier conversations with full-history search, and pin messages you need again.",
       accent: BrutalColors.accentBlue,
-      icon: '▶',
+      icon: "▶",
     },
     {
-      title: 'VOICE NOTES',
-      desc: 'Record, send, listen. Async audio dispatches with waveform preview.',
+      title: "SHARED WORKSPACES",
+      desc: "Invite your team, manage roles, and keep separate projects in their own spaces.",
       accent: BrutalColors.accentGreen,
-      icon: '~',
+      icon: "~",
     },
   ];
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor={BrutalColors.bgPaper} />
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor={BrutalColors.bgPaper}
+      />
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* ═══ NAV BAR ═══ */}
         <View style={styles.navBar}>
           <View style={styles.logoRow}>
@@ -61,8 +63,18 @@ export const LandingView: React.FC<LandingViewProps> = ({ onLogin, onSignUp }) =
           </View>
 
           <View style={styles.navActions}>
-            <BrutalButton title="LOG IN" onPress={onLogin} variant="outline" size="sm" />
-            <BrutalButton title="SIGN UP" onPress={onSignUp} variant="yellow" size="sm" />
+            <BrutalButton
+              title="LOG IN"
+              onPress={onLogin}
+              variant="outline"
+              size="sm"
+            />
+            <BrutalButton
+              title="SIGN UP"
+              onPress={onSignUp}
+              variant="yellow"
+              size="sm"
+            />
           </View>
         </View>
 
@@ -77,13 +89,18 @@ export const LandingView: React.FC<LandingViewProps> = ({ onLogin, onSignUp }) =
 
           <View style={styles.headlineContainer}>
             <Text style={styles.headline}>TALK</Text>
-            <Text style={[styles.headline, { color: BrutalColors.accentPink }]}>BOLD.</Text>
+            <Text style={[styles.headline, { color: BrutalColors.accentPink }]}>
+              BOLD.
+            </Text>
             <Text style={styles.headline}>BUILD</Text>
-            <Text style={[styles.headline, { color: BrutalColors.accentBlue }]}>LOUD.</Text>
+            <Text style={[styles.headline, { color: BrutalColors.accentBlue }]}>
+              LOUD.
+            </Text>
           </View>
 
           <Text style={styles.subhead}>
-            The communication platform that doesn't whisper. Text, voice & video for creative studios who build things that matter.
+            A shared workspace for creative studios. Keep conversations
+            organized and build together.
           </Text>
 
           <View style={styles.ctaRow}>
@@ -102,27 +119,6 @@ export const LandingView: React.FC<LandingViewProps> = ({ onLogin, onSignUp }) =
               style={styles.ctaSecondary}
             />
           </View>
-
-          {/* Social Proof Avatars */}
-          <View style={styles.proofRow}>
-            <View style={styles.avatarStack}>
-              {avatars.map((mono, index) => (
-                <View
-                  key={mono}
-                  style={[
-                    styles.proofAvatar,
-                    {
-                      marginLeft: index === 0 ? 0 : -10,
-                      zIndex: avatars.length - index,
-                    },
-                  ]}
-                >
-                  <Text style={styles.proofAvatarText}>{mono}</Text>
-                </View>
-              ))}
-            </View>
-            <Text style={styles.proofText}>6 STUDIOS ALREADY BUILDING</Text>
-          </View>
         </View>
 
         {/* ═══ FEATURE CARDS ═══ */}
@@ -131,7 +127,12 @@ export const LandingView: React.FC<LandingViewProps> = ({ onLogin, onSignUp }) =
           {features.map((item) => (
             <BrutalCard key={item.title} style={styles.featureCard}>
               <View style={styles.featureRow}>
-                <View style={[styles.featureIconBadge, { backgroundColor: item.accent }]}>
+                <View
+                  style={[
+                    styles.featureIconBadge,
+                    { backgroundColor: item.accent },
+                  ]}
+                >
                   <Text style={styles.featureIconText}>{item.icon}</Text>
                 </View>
                 <View style={styles.featureTextCol}>
@@ -152,7 +153,7 @@ export const LandingView: React.FC<LandingViewProps> = ({ onLogin, onSignUp }) =
             <Text style={styles.footerBrandText}>FABLE STUDIO © 2026</Text>
           </View>
           <Text style={styles.footerMetaText}>
-            ENCRYPTED • OPEN SOURCE • BUILT DIFFERENT
+            CONVERSATIONS FOR CREATIVE TEAMS
           </Text>
         </View>
       </ScrollView>
@@ -169,9 +170,9 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   navBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: 3,
@@ -179,8 +180,8 @@ const styles = StyleSheet.create({
     backgroundColor: BrutalColors.bgCard,
   },
   logoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
   },
   logoBadge: {
@@ -190,27 +191,27 @@ const styles = StyleSheet.create({
     borderWidth: 2.5,
     borderColor: BrutalColors.border,
     borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   logoBadgeText: {
     fontFamily: Fonts?.sans,
-    fontWeight: '900',
+    fontWeight: "900",
     fontSize: 22,
     color: BrutalColors.ink,
   },
   logoText: {
     fontFamily: Fonts?.sans,
-    fontWeight: '900',
+    fontWeight: "900",
     fontSize: 22,
     letterSpacing: -0.5,
     color: BrutalColors.ink,
   },
   navActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
-    marginLeft: 'auto',
+    marginLeft: "auto",
   },
   heroSection: {
     paddingHorizontal: 20,
@@ -225,7 +226,7 @@ const styles = StyleSheet.create({
   },
   headline: {
     fontFamily: Fonts?.sans,
-    fontWeight: '900',
+    fontWeight: "900",
     fontSize: 48,
     lineHeight: 50,
     letterSpacing: -1.5,
@@ -235,7 +236,7 @@ const styles = StyleSheet.create({
     fontFamily: Fonts?.sans,
     fontSize: 16,
     lineHeight: 24,
-    fontWeight: '500',
+    fontWeight: "500",
     color: BrutalColors.inkSecondary,
     marginBottom: 24,
   },
@@ -244,39 +245,39 @@ const styles = StyleSheet.create({
     marginBottom: 28,
   },
   ctaPrimary: {
-    width: '100%',
+    width: "100%",
   },
   ctaSecondary: {
-    width: '100%',
+    width: "100%",
   },
   proofRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
   },
   avatarStack: {
-    flexDirection: 'row',
+    flexDirection: "row",
   },
   proofAvatar: {
     width: 32,
     height: 32,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: "#FFFFFF",
     borderWidth: 2,
     borderColor: BrutalColors.border,
     borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   proofAvatarText: {
     fontFamily: Fonts?.mono,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: "800",
     color: BrutalColors.ink,
   },
   proofText: {
     fontFamily: Fonts?.mono,
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: "700",
     color: BrutalColors.inkMuted,
     letterSpacing: 0.5,
   },
@@ -287,7 +288,7 @@ const styles = StyleSheet.create({
   },
   sectionHeader: {
     fontFamily: Fonts?.sans,
-    fontWeight: '900',
+    fontWeight: "900",
     fontSize: 18,
     letterSpacing: 0.5,
     color: BrutalColors.ink,
@@ -297,8 +298,8 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   featureRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    alignItems: "flex-start",
     gap: 14,
   },
   featureIconBadge: {
@@ -307,12 +308,12 @@ const styles = StyleSheet.create({
     borderWidth: 2.5,
     borderColor: BrutalColors.border,
     borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   featureIconText: {
     fontFamily: Fonts?.mono,
-    fontWeight: '900',
+    fontWeight: "900",
     fontSize: 20,
     color: BrutalColors.ink,
   },
@@ -321,7 +322,7 @@ const styles = StyleSheet.create({
   },
   featureTitle: {
     fontFamily: Fonts?.sans,
-    fontWeight: '900',
+    fontWeight: "900",
     fontSize: 16,
     letterSpacing: 0.2,
     color: BrutalColors.ink,
@@ -331,7 +332,7 @@ const styles = StyleSheet.create({
     fontFamily: Fonts?.sans,
     fontSize: 13,
     lineHeight: 18,
-    fontWeight: '500',
+    fontWeight: "500",
     color: BrutalColors.inkSecondary,
   },
   footer: {
@@ -343,8 +344,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   footerBrand: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
   },
   footerLogoBadge: {
@@ -352,27 +353,27 @@ const styles = StyleSheet.create({
     height: 26,
     backgroundColor: BrutalColors.accentYellow,
     borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderColor: "#FFFFFF",
     borderRadius: 3,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   footerLogoText: {
     fontFamily: Fonts?.sans,
-    fontWeight: '900',
+    fontWeight: "900",
     fontSize: 14,
     color: BrutalColors.ink,
   },
   footerBrandText: {
     fontFamily: Fonts?.mono,
     fontSize: 12,
-    fontWeight: '700',
-    color: 'rgba(255, 255, 255, 0.7)',
+    fontWeight: "700",
+    color: "rgba(255, 255, 255, 0.7)",
   },
   footerMetaText: {
     fontFamily: Fonts?.mono,
     fontSize: 10,
-    color: 'rgba(255, 255, 255, 0.5)',
+    color: "rgba(255, 255, 255, 0.5)",
     letterSpacing: 0.8,
   },
 });

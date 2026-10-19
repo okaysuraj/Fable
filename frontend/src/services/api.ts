@@ -1,161 +1,304 @@
+/** Typed feature endpoints keep URL construction and JSON payloads out of components. */
+import { request } from "./request";
+export { ApiError } from "./request";
 import {
   Channel,
   Message,
   User,
   WorkspaceSettings,
-  VoiceNoteData,
-} from '../types/chat';
+  ChannelMember,
+} from "../types/chat";
 
-const API_BASE = '/api';
-
-function getAuthHeaders(): Record<string, string> {
-  const token = localStorage.getItem('fable_token');
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  return headers;
+export interface Workspace {
+  id: string;
+  name: string;
+  role: string;
 }
-
-export interface HealthResponse {
-  status: string;
-  service: string;
-  version: string;
-  uptime: number;
-  timestamp: string;
+export interface MessagePage {
+  data: Message[];
+  hasMore: boolean;
+  nextCursor: string | null;
+  changeCursor: string;
+  hasOlder: boolean;
+  hasNewer: boolean;
+  olderCursor: string | null;
+  newerCursor: string | null;
 }
-
-export interface AuthResponse {
-  token: string;
-  user: User;
+export interface DirectoryPage<T> {
+  data: T[];
+  total: number;
+  hasMore: boolean;
+  nextCursor: string | null;
 }
-
+export interface DirectoryQuery {
+  limit?: number;
+  after?: string;
+  q?: string;
+  signal?: AbortSignal;
+}
+export interface HistoryQuery {
+  before?: string;
+  after?: string;
+  around?: string;
+}
+export interface Invitation {
+  id: string;
+  email: string;
+  expiresAt: string;
+  acceptedAt: string | null;
+  createdAt: string;
+  status: "pending" | "expired" | "accepted";
+}
+export interface SearchResult {
+  message: Message;
+  channel: { id: string; name: string };
+}
+export interface SearchPage {
+  data: SearchResult[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+export interface AuditEvent {
+  id: string;
+  actorId: string;
+  action: string;
+  targetId: string | null;
+  createdAt: string;
+}
+export interface AuditPage {
+  data: AuditEvent[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+const directoryQuery = (options: DirectoryQuery = {}) => {
+  const query = new URLSearchParams({ limit: String(options.limit || 50) });
+  if (options.after) query.set("after", options.after);
+  if (options.q?.trim()) query.set("q", options.q.trim());
+  return query.toString();
+};
+const historyQuery = (options?: string | HistoryQuery) => {
+  const query = new URLSearchParams({ limit: "50" });
+  if (typeof options === "string") query.set("before", options);
+  else if (options)
+    for (const [key, value] of Object.entries(options))
+      if (value) query.set(key, value);
+  return query.toString();
+};
 export const api = {
-  // ─── AUTH ─────────────────────────────────
-  async register(email: string, password: string, name: string): Promise<AuthResponse> {
-    const res = await fetch(`${API_BASE}/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name }),
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'Registration failed');
-    }
-    return res.json();
+  createWorkspace: (name: string) =>
+    request<{ data: Workspace }>("/workspace", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  renameWorkspace: (id: string, name: string) =>
+    request<{ data: Workspace }>(`/workspace/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
+  setWorkspaceRole: (id: string, userId: string, role: "admin" | "member") =>
+    request<void>(
+      `/workspace/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`,
+      { method: "PATCH", body: JSON.stringify({ role }) },
+    ),
+  removeWorkspaceMember: (id: string, userId: string) =>
+    request<void>(
+      `/workspace/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" },
+    ),
+  transferWorkspace: (id: string, userId: string) =>
+    request<{ data: Workspace }>(
+      `/workspace/${encodeURIComponent(id)}/transfer-ownership`,
+      { method: "POST", body: JSON.stringify({ userId }) },
+    ),
+  leaveWorkspace: (id: string) =>
+    request<void>(`/workspace/${encodeURIComponent(id)}/leave`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  fetchInvitations: (options?: DirectoryQuery) =>
+    request<DirectoryPage<Invitation>>(
+      `/workspace/invitations?${directoryQuery(options)}`,
+      { signal: options?.signal },
+    ),
+  revokeInvitation: (id: string) =>
+    request<void>(`/workspace/invitations/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  fetchAudit: (before?: string, signal?: AbortSignal) =>
+    request<AuditPage>(
+      `/workspace/audit?limit=50${before ? `&before=${encodeURIComponent(before)}` : ""}`,
+      { signal },
+    ),
+  searchMessages: (
+    query: string,
+    after?: string,
+    channelId?: string,
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams({ q: query.trim(), limit: "50" });
+    if (after) params.set("after", after);
+    if (channelId) params.set("channelId", channelId);
+    return request<SearchPage>(`/messages/search?${params}`, { signal });
   },
-
-  async login(email: string, password: string): Promise<AuthResponse> {
-    const res = await fetch(`${API_BASE}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'Login failed');
-    }
-    return res.json();
-  },
-
-  async fetchMe(): Promise<{ user: User }> {
-    const res = await fetch(`${API_BASE}/auth/me`, {
-      headers: getAuthHeaders(),
-    });
-    if (!res.ok) throw new Error('Not authenticated');
-    return res.json();
-  },
-
-  // ─── HEALTH ───────────────────────────────
-  async checkHealth(): Promise<HealthResponse> {
-    const res = await fetch(`${API_BASE}/health`);
-    if (!res.ok) throw new Error(`Health check failed: ${res.statusText}`);
-    return res.json();
-  },
-
-  // ─── CHANNELS ─────────────────────────────
-  async fetchChannels(): Promise<Channel[]> {
-    const res = await fetch(`${API_BASE}/channels`, { headers: getAuthHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch channels: ${res.statusText}`);
-    const json = await res.json();
-    return json.data;
-  },
-
-  async fetchChannel(id: string): Promise<Channel> {
-    const res = await fetch(`${API_BASE}/channels/${id}`, { headers: getAuthHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch channel ${id}: ${res.statusText}`);
-    const json = await res.json();
-    return json.data;
-  },
-
-  // ─── MESSAGES ─────────────────────────────
-  async fetchAllMessages(): Promise<Record<string, Message[]>> {
-    const res = await fetch(`${API_BASE}/messages`, { headers: getAuthHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch messages: ${res.statusText}`);
-    const json = await res.json();
-    return json.data;
-  },
-
-  async fetchMessages(channelId: string): Promise<Message[]> {
-    const res = await fetch(`${API_BASE}/messages/${channelId}`, { headers: getAuthHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch messages for ${channelId}: ${res.statusText}`);
-    const json = await res.json();
-    return json.data;
-  },
-
-  async sendMessage(
+  updateChannel: (id: string, data: { name: string; topic: string }) =>
+    request<{ data: Channel }>(`/channels/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  transferChannel: (id: string, userId: string) =>
+    request<{ data: Channel }>(
+      `/channels/${encodeURIComponent(id)}/transfer-ownership`,
+      { method: "POST", body: JSON.stringify({ userId }) },
+    ),
+  deleteChannel: (id: string, confirmName: string) =>
+    request<void>(`/channels/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ confirmName }),
+    }),
+  fetchWorkspaces: (options?: DirectoryQuery) =>
+    request<DirectoryPage<Workspace> & { currentWorkspaceId: string | null }>(
+      `/workspace?${directoryQuery(options)}`,
+      { signal: options?.signal },
+    ),
+  fetchWorkspace: (id: string) =>
+    request<{ data: Workspace }>(`/workspace/${encodeURIComponent(id)}`),
+  invite: (email: string) =>
+    request<{ data: { token: string; email: string; expiresAt: string } }>(
+      "/workspace/invitations",
+      { method: "POST", body: JSON.stringify({ email }) },
+    ),
+  joinWorkspace: (token: string) =>
+    request<{ data: { workspaceId: string } }>("/workspace/join", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+  createSession: () =>
+    request<{ user: User }>("/auth/session", { method: "POST" }),
+  fetchMe: () => request<{ user: User }>("/auth/me"),
+  logoutAllDevices: () => request<void>("/auth/logout", { method: "POST" }),
+  fetchChannelDirectory: (options?: DirectoryQuery) =>
+    request<DirectoryPage<Channel>>(`/channels?${directoryQuery(options)}`, {
+      signal: options?.signal,
+    }),
+  fetchChannel: async (id: string) =>
+    (await request<{ data: Channel }>(`/channels/${encodeURIComponent(id)}`))
+      .data,
+  markChannelRead: (id: string, messageId: string) =>
+    request<void>(`/channels/${encodeURIComponent(id)}/read`, {
+      method: "POST",
+      body: JSON.stringify({ messageId }),
+    }),
+  createChannel: async (
+    name: string,
+    topic: string,
+    type: "text" | "audio" | "video" = "text",
+    isPrivate = false,
+  ) =>
+    (
+      await request<{ data: Channel }>("/channels", {
+        method: "POST",
+        body: JSON.stringify({ name, topic, type, isPrivate }),
+      })
+    ).data,
+  fetchMessagePage: (id: string, options?: string | HistoryQuery) =>
+    request<MessagePage>(
+      `/messages/${encodeURIComponent(id)}?${historyQuery(options)}`,
+    ),
+  sendMessage: async (
     channelId: string,
     content: string,
-    voiceNote?: VoiceNoteData,
-    codeSnippet?: { language: string; code: string }
-  ): Promise<Message> {
-    const res = await fetch(`${API_BASE}/messages`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ channelId, content, voiceNote, codeSnippet }),
-    });
-    if (!res.ok) throw new Error(`Failed to send message: ${res.statusText}`);
-    const json = await res.json();
-    return json.data;
-  },
-
-  async toggleReaction(messageId: string, icon: string): Promise<Message> {
-    const res = await fetch(`${API_BASE}/messages/${messageId}/reactions`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ icon }),
-    });
-    if (!res.ok) throw new Error(`Failed to toggle reaction: ${res.statusText}`);
-    const json = await res.json();
-    return json.data;
-  },
-
-  // ─── TEAM ─────────────────────────────────
-  async fetchTeamMembers(): Promise<User[]> {
-    const res = await fetch(`${API_BASE}/team/members`, { headers: getAuthHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch team members: ${res.statusText}`);
-    const json = await res.json();
-    return json.data;
-  },
-
-  // ─── SETTINGS ─────────────────────────────
-  async fetchSettings(): Promise<WorkspaceSettings> {
-    const res = await fetch(`${API_BASE}/settings`, { headers: getAuthHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch settings: ${res.statusText}`);
-    const json = await res.json();
-    return json.data;
-  },
-
-  async updateSettings(settings: Partial<WorkspaceSettings>): Promise<WorkspaceSettings> {
-    const res = await fetch(`${API_BASE}/settings`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(settings),
-    });
-    if (!res.ok) throw new Error(`Failed to update settings: ${res.statusText}`);
-    const json = await res.json();
-    return json.data;
-  },
+    options: {
+      codeSnippet?: Message["codeSnippet"];
+      clientMutationId?: string;
+    } = {},
+  ) =>
+    (
+      await request<{ data: Message }>("/messages", {
+        method: "POST",
+        body: JSON.stringify({
+          channelId,
+          content,
+          ...options,
+        }),
+      })
+    ).data,
+  toggleReaction: async (id: string, icon: string) =>
+    (
+      await request<{ data: Message }>(
+        `/messages/${encodeURIComponent(id)}/reactions`,
+        { method: "POST", body: JSON.stringify({ icon }) },
+      )
+    ).data,
+  editMessage: async (id: string, content: string, expectedVersion: number) =>
+    (
+      await request<{ data: Message }>(`/messages/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ content, expectedVersion }),
+      })
+    ).data,
+  deleteMessage: async (id: string, expectedVersion: number) =>
+    (
+      await request<{ data: Message }>(`/messages/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        body: JSON.stringify({ expectedVersion }),
+      })
+    ).data,
+  pinMessage: async (id: string, isPinned: boolean, expectedVersion: number) =>
+    (
+      await request<{ data: Message }>(
+        `/messages/${encodeURIComponent(id)}/pin`,
+        { method: "PUT", body: JSON.stringify({ isPinned, expectedVersion }) },
+      )
+    ).data,
+  fetchMessageChanges: (channelId: string, after: string) =>
+    request<{ data: Message[]; changeCursor: string; hasMore: boolean }>(
+      `/messages/${encodeURIComponent(channelId)}/changes?after=${encodeURIComponent(after)}&limit=100`,
+    ),
+  fetchChannelPins: (channelId: string, options?: string | HistoryQuery) =>
+    request<MessagePage>(
+      `/channels/${encodeURIComponent(channelId)}/pins?${historyQuery(options)}`,
+    ),
+  fetchChannelMembers: (channelId: string, options?: DirectoryQuery) =>
+    request<DirectoryPage<ChannelMember> & { canManageMembers: boolean }>(
+      `/channels/${encodeURIComponent(channelId)}/members?${directoryQuery(options)}`,
+      { signal: options?.signal },
+    ),
+  fetchMemberCandidates: (channelId: string, options?: DirectoryQuery) =>
+    request<DirectoryPage<User>>(
+      `/channels/${encodeURIComponent(channelId)}/member-candidates?${directoryQuery(options)}`,
+      { signal: options?.signal },
+    ),
+  addChannelMember: (channelId: string, userId: string) =>
+    request<{ data: ChannelMember }>(
+      `/channels/${encodeURIComponent(channelId)}/members`,
+      { method: "POST", body: JSON.stringify({ userId }) },
+    ),
+  removeChannelMember: (channelId: string, userId: string) =>
+    request<void>(
+      `/channels/${encodeURIComponent(channelId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" },
+    ),
+  updateProfile: (profile: { name: string; statusText: string }) =>
+    request<{ user: User }>("/auth/profile", {
+      method: "PATCH",
+      body: JSON.stringify(profile),
+    }),
+  fetchTeamDirectory: (options?: DirectoryQuery) =>
+    request<DirectoryPage<User>>(`/team/members?${directoryQuery(options)}`, {
+      signal: options?.signal,
+    }),
+  fetchProfiles: (userIds: string[]) =>
+    request<{ data: User[] }>("/team/profiles", {
+      method: "POST",
+      body: JSON.stringify({ userIds }),
+    }),
+  fetchSettings: async () =>
+    (await request<{ data: WorkspaceSettings }>("/settings")).data,
+  updateSettings: async (settings: Partial<WorkspaceSettings>) =>
+    (
+      await request<{ data: WorkspaceSettings }>("/settings", {
+        method: "PUT",
+        body: JSON.stringify(settings),
+      })
+    ).data,
 };

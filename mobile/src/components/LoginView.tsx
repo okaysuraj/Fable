@@ -1,82 +1,131 @@
-import React, { useState } from 'react';
+/** Native email forms support verification and recovery without exposing protected content. */
+import React, { useState } from "react";
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
   Pressable,
-} from 'react-native';
-import { BrutalColors, Fonts } from '@/constants/theme';
-import { BrutalButton } from './brutal/BrutalButton';
-import { BrutalCard } from './brutal/BrutalCard';
-import { BrutalInput } from './brutal/BrutalInput';
-import { api } from '@/services/api';
-import { User } from '@/types';
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { BrutalColors, Fonts } from "@/constants/theme";
+import { BrutalButton } from "./brutal/BrutalButton";
+import { BrutalCard } from "./brutal/BrutalCard";
+import { BrutalInput } from "./brutal/BrutalInput";
+import { api, authError } from "@/services/api";
+import { User } from "@/types/chat";
 
 interface LoginViewProps {
-  onSuccess: (user: User, token: string) => void;
+  onSuccess: (user: User) => void;
   onBackToLanding: () => void;
-  initialMode?: 'login' | 'register';
+  initialMode?: "login" | "register";
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({
   onSuccess,
   onBackToLanding,
-  initialMode = 'login',
+  initialMode = "login",
 }) => {
-  const [mode, setMode] = useState<'login' | 'register'>(initialMode);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [error, setError] = useState('');
+  const [mode, setMode] = useState<"login" | "register" | "reset">(initialMode);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [verificationPending, setVerificationPending] = useState(false);
+  const [resendAfter, setResendAfter] = useState(0);
 
   const handleSubmit = async () => {
-    setError('');
+    if (loading) return;
+    setError("");
+    setNotice("");
     setLoading(true);
 
     try {
-      if (mode === 'register') {
+      if (mode === "reset") {
+        if (!email.trim()) throw new Error("Enter your email address.");
+        await api.resetPassword(email.trim());
+        setNotice(
+          "If an account exists for this email, a password reset link will arrive in your inbox. Check your spam folder too.",
+        );
+      } else if (mode === "register") {
         if (!name.trim()) {
-          setError('Name is required');
+          setError("Name is required");
           setLoading(false);
           return;
         }
         if (!email.trim() || !password.trim()) {
-          setError('Email and password required');
+          setError("Email and password required");
           setLoading(false);
           return;
         }
-        const res = await api.register(email.trim(), password, name.trim());
-        onSuccess(res.user, res.token);
+        await api.register(email.trim(), password, name.trim());
+        setNotice(
+          "Verification email sent. Open the link in your inbox, then return here to sign in.",
+        );
+        setVerificationPending(true);
+        setResendAfter(Date.now() + 60_000);
+        setMode("login");
+        setPassword("");
       } else {
         if (!email.trim() || !password.trim()) {
-          setError('Email and password required');
+          setError("Email and password required");
           setLoading(false);
           return;
         }
         const res = await api.login(email.trim(), password);
-        onSuccess(res.user, res.token);
+        onSuccess(res.user);
       }
-    } catch (err: any) {
-      setError(err?.message || 'Something went wrong');
+    } catch (err: unknown) {
+      if (err instanceof Error && /verify your email/i.test(err.message))
+        setVerificationPending(true);
+      setError(authError(err));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleFillDemo = () => {
-    setEmail('suraj@fable.studio');
-    setPassword('password123');
-    setError('');
+  const handleResend = async () => {
+    if (loading) return;
+    setError("");
+    if (Date.now() < resendAfter) {
+      setError(
+        "Please wait a minute before requesting another verification email.",
+      );
+      return;
+    }
+    if (!email.trim() || !password) {
+      setError(
+        "Enter your email and password to resend the verification link.",
+      );
+      return;
+    }
+    setLoading(true);
+    try {
+      await api.resendVerification(email.trim(), password);
+      setResendAfter(Date.now() + 60_000);
+      setNotice(
+        "A new verification link has been sent. Check your inbox and spam folder.",
+      );
+    } catch (err) {
+      setError(authError(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor={BrutalColors.bgPaper} />
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor={BrutalColors.bgPaper}
+      />
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         {/* Back and Brand Header */}
         <View style={styles.header}>
           <Pressable onPress={onBackToLanding} style={styles.backBtn}>
@@ -90,7 +139,11 @@ export const LoginView: React.FC<LoginViewProps> = ({
             <View>
               <Text style={styles.logoTitle}>FABLE</Text>
               <Text style={styles.logoSubtitle}>
-                {mode === 'login' ? 'WELCOME BACK' : 'JOIN THE STUDIO'}
+                {mode === "login"
+                  ? "WELCOME BACK"
+                  : mode === "reset"
+                    ? "RESET YOUR PASSWORD"
+                    : "JOIN THE STUDIO"}
               </Text>
             </View>
           </View>
@@ -101,19 +154,23 @@ export const LoginView: React.FC<LoginViewProps> = ({
           {/* Mode Tabs */}
           <View style={styles.tabsContainer}>
             <Pressable
+              disabled={loading}
               onPress={() => {
-                setMode('login');
-                setError('');
+                setMode("login");
+                setError("");
+                setNotice("");
               }}
               style={[
                 styles.tab,
-                mode === 'login' ? styles.tabActive : styles.tabInactive,
+                mode === "login" ? styles.tabActive : styles.tabInactive,
               ]}
             >
               <Text
                 style={[
                   styles.tabText,
-                  mode === 'login' ? styles.tabTextActive : styles.tabTextInactive,
+                  mode === "login"
+                    ? styles.tabTextActive
+                    : styles.tabTextInactive,
                 ]}
               >
                 LOG IN
@@ -121,20 +178,24 @@ export const LoginView: React.FC<LoginViewProps> = ({
             </Pressable>
 
             <Pressable
+              disabled={loading}
               onPress={() => {
-                setMode('register');
-                setError('');
+                setMode("register");
+                setError("");
+                setNotice("");
               }}
               style={[
                 styles.tab,
                 { borderLeftWidth: 3, borderLeftColor: BrutalColors.border },
-                mode === 'register' ? styles.tabActive : styles.tabInactive,
+                mode === "register" ? styles.tabActive : styles.tabInactive,
               ]}
             >
               <Text
                 style={[
                   styles.tabText,
-                  mode === 'register' ? styles.tabTextActive : styles.tabTextInactive,
+                  mode === "register"
+                    ? styles.tabTextActive
+                    : styles.tabTextInactive,
                 ]}
               >
                 SIGN UP
@@ -144,13 +205,17 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
           {/* Form Fields */}
           <View style={styles.form}>
-            {mode === 'register' && (
+            {mode === "register" && (
               <View style={styles.fieldGroup}>
                 <Text style={styles.label}>YOUR NAME</Text>
                 <BrutalInput
                   value={name}
                   onChangeText={setName}
-                  placeholder="Suraj"
+                  placeholder="Your name"
+                  accessibilityLabel="Your name"
+                  autoComplete="name"
+                  maxLength={80}
+                  editable={!loading}
                   autoCapitalize="words"
                 />
               </View>
@@ -162,26 +227,56 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 value={email}
                 onChangeText={setEmail}
                 placeholder="you@studio.com"
+                accessibilityLabel="Email"
+                autoComplete="email"
+                maxLength={254}
+                editable={!loading}
                 keyboardType="email-address"
                 autoCapitalize="none"
               />
             </View>
 
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>PASSWORD</Text>
-              <BrutalInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder="••••••••"
-                secureTextEntry
-                autoCapitalize="none"
-              />
-            </View>
+            {mode !== "reset" && (
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>PASSWORD</Text>
+                <BrutalInput
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="••••••••"
+                  secureTextEntry
+                  accessibilityLabel="Password"
+                  autoComplete={
+                    mode === "register" ? "new-password" : "current-password"
+                  }
+                  maxLength={128}
+                  editable={!loading}
+                  autoCapitalize="none"
+                />
+              </View>
+            )}
+
+            {notice ? (
+              <Text accessibilityLiveRegion="polite" style={styles.noticeText}>
+                {notice}
+              </Text>
+            ) : null}
+            {mode === "register" ? (
+              <Text style={styles.noticeText}>
+                Verify your email before signing in. Use at least 12 characters
+                for your password.
+              </Text>
+            ) : null}
 
             {/* Error Banner */}
             {error ? (
               <View style={styles.errorBox}>
-                <Text style={styles.errorText}>✕ {error}</Text>
+                <Text
+                  accessibilityRole="alert"
+                  accessibilityLiveRegion="assertive"
+                  style={styles.errorText}
+                >
+                  ✕ {error}
+                </Text>
               </View>
             ) : null}
 
@@ -189,10 +284,12 @@ export const LoginView: React.FC<LoginViewProps> = ({
             <BrutalButton
               title={
                 loading
-                  ? 'WORKING...'
-                  : mode === 'login'
-                  ? 'ENTER THE STUDIO →'
-                  : 'CREATE ACCOUNT →'
+                  ? "WORKING..."
+                  : mode === "reset"
+                    ? "SEND RESET LINK"
+                    : mode === "login"
+                      ? "ENTER THE STUDIO →"
+                      : "CREATE ACCOUNT →"
               }
               onPress={handleSubmit}
               variant="yellow"
@@ -201,19 +298,31 @@ export const LoginView: React.FC<LoginViewProps> = ({
               style={styles.submitBtn}
             />
 
-            {/* Demo Helper Button */}
-            {mode === 'login' && (
-              <Pressable onPress={handleFillDemo} style={styles.demoBox}>
-                <Text style={styles.demoText}>DEMO: suraj@fable.studio / password123</Text>
-                <Text style={styles.demoFillHint}>(TAP TO QUICK-FILL)</Text>
-              </Pressable>
+            {mode === "login" && (
+              <BrutalButton
+                title="FORGOT PASSWORD?"
+                onPress={() => {
+                  setMode("reset");
+                  setError("");
+                  setNotice("");
+                  setPassword("");
+                }}
+                disabled={loading}
+                variant="outline"
+              />
+            )}
+            {mode === "login" && verificationPending && (
+              <BrutalButton
+                title="RESEND VERIFICATION EMAIL"
+                onPress={handleResend}
+                disabled={loading}
+                variant="outline"
+              />
             )}
           </View>
         </BrutalCard>
 
-        <Text style={styles.tagline}>
-          ENCRYPTED · END-TO-END · BUILT DIFFERENT
-        </Text>
+        <Text style={styles.tagline}>YOUR WORKSPACE, CONNECTED</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -226,14 +335,14 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 20,
-    justifyContent: 'center',
-    minHeight: '100%',
+    justifyContent: "center",
+    minHeight: "100%",
   },
   header: {
     marginBottom: 24,
   },
   backBtn: {
-    alignSelf: 'flex-start',
+    alignSelf: "flex-start",
     marginBottom: 16,
     paddingVertical: 6,
     paddingHorizontal: 10,
@@ -244,13 +353,13 @@ const styles = StyleSheet.create({
   },
   backBtnText: {
     fontFamily: Fonts?.mono,
-    fontWeight: '800',
+    fontWeight: "800",
     fontSize: 11,
     color: BrutalColors.ink,
   },
   logoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
   },
   logoBadge: {
@@ -260,18 +369,18 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: BrutalColors.border,
     borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   logoBadgeText: {
     fontFamily: Fonts?.sans,
-    fontWeight: '900',
+    fontWeight: "900",
     fontSize: 28,
     color: BrutalColors.ink,
   },
   logoTitle: {
     fontFamily: Fonts?.sans,
-    fontWeight: '900',
+    fontWeight: "900",
     fontSize: 26,
     letterSpacing: -0.5,
     color: BrutalColors.ink,
@@ -279,39 +388,39 @@ const styles = StyleSheet.create({
   logoSubtitle: {
     fontFamily: Fonts?.mono,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: "800",
     color: BrutalColors.inkMuted,
     letterSpacing: 1,
   },
   authCard: {
     padding: 0,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   tabsContainer: {
-    flexDirection: 'row',
+    flexDirection: "row",
     borderBottomWidth: 3,
     borderBottomColor: BrutalColors.border,
   },
   tab: {
     flex: 1,
     paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   tabActive: {
     backgroundColor: BrutalColors.ink,
   },
   tabInactive: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: "#FFFFFF",
   },
   tabText: {
     fontFamily: Fonts?.sans,
-    fontWeight: '900',
+    fontWeight: "900",
     fontSize: 13,
     letterSpacing: 0.8,
   },
   tabTextActive: {
-    color: '#FFFFFF',
+    color: "#FFFFFF",
   },
   tabTextInactive: {
     color: BrutalColors.ink,
@@ -320,18 +429,24 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 16,
   },
+  noticeText: {
+    fontFamily: Fonts?.sans,
+    fontSize: 14,
+    lineHeight: 21,
+    color: BrutalColors.inkSecondary,
+  },
   fieldGroup: {
     gap: 6,
   },
   label: {
     fontFamily: Fonts?.sans,
-    fontWeight: '800',
+    fontWeight: "800",
     fontSize: 11,
     color: BrutalColors.inkSecondary,
     letterSpacing: 0.8,
   },
   errorBox: {
-    backgroundColor: '#FFE0E9',
+    backgroundColor: "#FFE0E9",
     borderWidth: 2.5,
     borderColor: BrutalColors.accentPink,
     borderRadius: 4,
@@ -339,41 +454,20 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontFamily: Fonts?.sans,
-    fontWeight: '800',
+    fontWeight: "800",
     fontSize: 13,
     color: BrutalColors.accentPink,
   },
   submitBtn: {
-    width: '100%',
+    width: "100%",
     marginTop: 4,
-  },
-  demoBox: {
-    borderTopWidth: 2,
-    borderTopColor: BrutalColors.inkFaint,
-    borderStyle: 'dashed',
-    paddingTop: 12,
-    alignItems: 'center',
-    gap: 4,
-  },
-  demoText: {
-    fontFamily: Fonts?.mono,
-    fontSize: 11,
-    fontWeight: '700',
-    color: BrutalColors.inkSecondary,
-    textAlign: 'center',
-  },
-  demoFillHint: {
-    fontFamily: Fonts?.mono,
-    fontSize: 10,
-    fontWeight: '800',
-    color: BrutalColors.accentBlue,
   },
   tagline: {
     fontFamily: Fonts?.mono,
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: "700",
     color: BrutalColors.inkMuted,
-    textAlign: 'center',
+    textAlign: "center",
     marginTop: 24,
     letterSpacing: 0.8,
   },

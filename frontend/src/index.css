@@ -2,34 +2,34 @@
 
 @layer base {
   :root {
-    --font-sans: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-mono: 'Space Mono', 'Courier New', monospace;
+    --font-sans: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: "Space Mono", "Courier New", monospace;
 
     /* Neo-Brutalism Paper Palette */
-    --bg-paper: #F5F0E8;
-    --bg-card: #FFFFFF;
-    --bg-card-alt: #FFF8E7;
-    --bg-input: #FFFFFF;
-    --bg-sidebar: #FFFDF7;
+    --bg-paper: #f5f0e8;
+    --bg-card: #ffffff;
+    --bg-card-alt: #fff8e7;
+    --bg-input: #ffffff;
+    --bg-sidebar: #fffdf7;
 
-    --ink: #1A1A1A;
-    --ink-secondary: #4A4A4A;
-    --ink-muted: #8A8A8A;
-    --ink-faint: #B8B8B8;
+    --ink: #1a1a1a;
+    --ink-secondary: #4a4a4a;
+    --ink-muted: #66605a;
+    --ink-faint: #b8b8b8;
 
-    --border: #1A1A1A;
+    --border: #1a1a1a;
     --border-width: 3px;
-    --shadow: 4px 4px 0px #1A1A1A;
-    --shadow-sm: 2px 2px 0px #1A1A1A;
-    --shadow-lg: 6px 6px 0px #1A1A1A;
-    --shadow-hover: 6px 6px 0px #1A1A1A;
+    --shadow: 4px 4px 0px #1a1a1a;
+    --shadow-sm: 2px 2px 0px #1a1a1a;
+    --shadow-lg: 6px 6px 0px #1a1a1a;
+    --shadow-hover: 6px 6px 0px #1a1a1a;
 
-    --accent-yellow: #FFD700;
-    --accent-pink: #FF3366;
-    --accent-blue: #4169E1;
-    --accent-green: #00C853;
-    --accent-orange: #FF6B35;
-    --accent-purple: #7C3AED;
+    --accent-yellow: #ffd700;
+    --accent-pink: #ff3366;
+    --accent-blue: #4169e1;
+    --accent-green: #00c853;
+    --accent-orange: #ff6b35;
+    --accent-purple: #7c3aed;
 
     --radius: 4px;
 
@@ -75,19 +75,6 @@ body {
   border-radius: var(--radius);
 }
 
-.brutal-card-alt {
-  background: var(--bg-card-alt);
-  border: var(--border-width) solid var(--border);
-  box-shadow: var(--shadow);
-  border-radius: var(--radius);
-}
-
-.brutal-card:hover,
-.brutal-card-alt:hover {
-  box-shadow: var(--shadow-hover);
-  transform: translate(-1px, -1px);
-}
-
 /* Brutalist button */
 .brutal-btn {
   display: inline-flex;
@@ -106,13 +93,10 @@ body {
   box-shadow: var(--shadow);
   border-radius: var(--radius);
   cursor: pointer;
-  transition: transform 100ms var(--ease-snap), box-shadow 100ms var(--ease-snap);
+  transition:
+    transform 100ms var(--ease-snap),
+    box-shadow 100ms var(--ease-snap);
   user-select: none;
-}
-
-.brutal-btn:hover {
-  transform: translate(-2px, -2px);
-  box-shadow: var(--shadow-lg);
 }
 
 .brutal-btn:active {
@@ -212,17 +196,6 @@ body {
   background: var(--ink-secondary);
 }
 
-/* Speaking Aura Pulse */
-@keyframes speaking-glow {
-  0% { box-shadow: 0 0 0 0 rgba(0, 200, 83, 0.5); }
-  70% { box-shadow: 0 0 0 12px rgba(0, 200, 83, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(0, 200, 83, 0); }
-}
-
-.speaking-pulse {
-  animation: speaking-glow 1.8s ease-in-out infinite;
-}
-
 /* Paper texture noise */
 .paper-texture::before {
   content: "";
@@ -235,10 +208,164 @@ body {
 
 /* Respect Prefers Reduced Motion */
 @media (prefers-reduced-motion: reduce) {
-  *, ::before, ::after {
+  *,
+  ::before,
+  ::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid var(--accent-blue);
+  outline-offset: 3px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .brutal-btn:not(:disabled):hover {
+    transform: translate(-1px, -1px);
+  }
+}
+.mobile-workspace-nav {
+  display: none;
+}
+.context-drawer {
+  width: 18rem;
+}
+@media (max-width: 1000px) {
+  .context-drawer {
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: min(20rem, 100%);
+    box-shadow: -4px 0 0 var(--border);
+  }
+}
+@media (max-width: 760px) {
+  .mobile-workspace-nav {
+    display: flex;
+  }
+  .workspace-sidebar {
+    display: none;
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 30;
+    max-width: 100%;
+  }
+  .workspace-sidebar.is-open {
+    display: block;
+  }
+  .dashboard-shell header {
+    padding-inline: 12px;
+    gap: 8px;
+  }
+  .dashboard-shell header button {
+    padding: 6px;
+  }
+  .dashboard-shell header button span {
+    display: none;
+  }
+  .message-scroll {
+    padding: 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brutal-btn:hover,
+  .brutal-btn:active {
+    transform: none;
+  }
+}
+
+.workspace-sidebar {
+  display: flex;
+  flex-direction: column;
+}
+.workspace-sidebar > aside {
+  flex: 1;
+  min-height: 0;
+}
+@media (max-width: 760px) {
+  .workspace-sidebar {
+    display: none;
+  }
+  .workspace-sidebar.is-open {
+    display: flex;
+  }
+}
+
+/* Keep the development-only Firebase emulator notice visible without blocking controls. */
+.firebase-emulator-warning {
+  pointer-events: none;
+}
+
+.dashboard-shell[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-paper: #1d1d1a;
+  --bg-card: #282824;
+  --bg-card-alt: #35342d;
+  --bg-input: #22221f;
+  --bg-sidebar: #23231f;
+  --ink: #f5f0e8;
+  --ink-secondary: #d5cfc5;
+  --ink-muted: #b9b3a9;
+  --ink-faint: #77736b;
+  --border: #b9b3a9;
+  --shadow: 4px 4px 0px #0b0b09;
+  --shadow-sm: 2px 2px 0px #0b0b09;
+  --shadow-lg: 6px 6px 0px #0b0b09;
+  --shadow-hover: 6px 6px 0px #0b0b09;
+  --accent-blue: #85a3ff;
+  color: var(--ink);
+}
+
+.dashboard-shell[data-theme="dark"]
+  .brutal-btn:not(.brutal-btn-outline):not(.brutal-btn-blue):not(
+    .brutal-btn-pink
+  ) {
+  color: #1a1a1a;
+}
+.dashboard-shell[data-theme="dark"] [class*="bg-[var(--accent-yellow)]"],
+.dashboard-shell[data-theme="dark"]
+  [class*="bg-[var(--accent-yellow)]"]
+  [class*="text-[var(--ink)]"] {
+  color: #1a1a1a;
+}
+
+.workspace-actions {
+  max-height: 38dvh;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+@media (max-width: 639px) {
+  .message-row {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+  .message-row > .message-actions {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+@media (pointer: coarse) {
+  .dashboard-shell button {
+    min-height: 44px;
+  }
+  .message-actions button,
+  .message-reactions button,
+  .dashboard-shell header button {
+    min-width: 44px;
+  }
+  .message-actions {
+    flex-wrap: wrap;
   }
 }

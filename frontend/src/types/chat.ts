@@ -1,4 +1,5 @@
-export type UserStatus = 'online' | 'idle' | 'in-huddle' | 'offline';
+/** Client DTOs describe the shipped text collaboration features, separate from database models. */
+export type UserStatus = "online" | "idle" | "in-huddle" | "offline";
 
 export interface User {
   id: string;
@@ -9,9 +10,10 @@ export interface User {
   status: UserStatus;
   statusText?: string;
   avatarColor?: string;
+  workspaceRole?: "owner" | "admin" | "member";
 }
 
-export type ChannelType = 'text' | 'audio' | 'video';
+export type ChannelType = "text" | "audio" | "video";
 
 export interface Channel {
   id: string;
@@ -21,23 +23,10 @@ export interface Channel {
   unreadCount?: number;
   isPrivate?: boolean;
   memberCount: number;
-  activeCall?: {
-    mode: 'audio' | 'video';
-    participantCount: number;
-    startedAt: string;
-  };
-}
-
-export interface Attachment {
-  id: string;
-  name: string;
-  size: string;
-  type: 'image' | 'code' | 'document';
-}
-
-export interface VoiceNoteData {
-  duration: string;
-  waveform: number[];
+  createdById?: string | null;
+  canManageMembers?: boolean;
+  canManageChannel?: boolean;
+  canLeave?: boolean;
 }
 
 export interface Reaction {
@@ -56,27 +45,18 @@ export interface Message {
     language: string;
     code: string;
   };
-  attachments?: Attachment[];
-  voiceNote?: VoiceNoteData;
   reactions?: Reaction[];
   isPinned?: boolean;
+  version: number;
+  updatedAt: string;
+  editedAt?: string | null;
+  deletedAt?: string | null;
+  canEdit: boolean;
+  canDelete: boolean;
+  canPin: boolean;
 }
 
-export interface CallParticipant {
-  id: string;
-  user: User;
-  isSpeaking: boolean;
-  isMuted: boolean;
-  isVideoOn: boolean;
-  isScreenSharing: boolean;
-  audioLevel: number; // 0 to 100
-  stream?: MediaStream | null;
-  accentColor: string;
-}
-
-export type CallMode = 'none' | 'audio' | 'video';
-
-export type ThemeMode = 'dark' | 'light';
+export type ThemeMode = "dark" | "light";
 
 export interface WorkspaceSettings {
   micDeviceId: string;
@@ -87,4 +67,11 @@ export interface WorkspaceSettings {
   theme: ThemeMode;
   inputVolume: number;
   outputVolume: number;
+}
+
+export interface ChannelMember extends User {
+  channelRole: "creator" | "member";
+  canRemove: boolean;
+  workspaceRole: "owner" | "admin" | "member";
+  joinedAt: string;
 }

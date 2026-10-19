@@ -1,0 +1,10 @@
+{
+  "name": "@fable/decode-uri-component-compat",
+  "version": "0.5.0",
+  "private": true,
+  "main": "index.cjs",
+  "license": "MIT",
+  "dependencies": {
+    "decode-uri-component-upstream": "npm:decode-uri-component@0.5.0"
+  }
+}

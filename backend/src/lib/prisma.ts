@@ -1,4 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+/** One Prisma client owns each process pool; migrations are an explicit operator command. */
+import { PrismaClient } from "@prisma/client";
+import "./config.js";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -8,10 +10,12 @@ declare global {
 export const prisma =
   global.__prisma ||
   new PrismaClient({
-    log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
+    // Prisma's automatic error logging can include invocation/query arguments.
+    // The API boundary records only safe error metadata and a request ID.
+    log: process.env.NODE_ENV === "development" ? ["warn"] : [],
   });
 
-if (process.env.NODE_ENV !== 'production') {
+if (process.env.NODE_ENV !== "production") {
   global.__prisma = prisma;
 }
 

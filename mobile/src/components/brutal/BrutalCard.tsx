@@ -1,13 +1,18 @@
-import React from 'react';
-import { View, ViewStyle, StyleProp, StyleSheet, Platform } from 'react-native';
-import { BrutalColors } from '@/constants/theme';
+/** A presentation-only surface using the active palette and platform shadow support. */
+import {
+  useBrutalTheme,
+  useBrutalStyles,
+  type BrutalPalette,
+} from "@/hooks/use-brutal-theme";
+import React from "react";
+import { View, ViewStyle, StyleProp, StyleSheet, Platform } from "react-native";
 
 interface BrutalCardProps {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   alt?: boolean;
   accentColor?: string;
-  shadowSize?: 'sm' | 'md' | 'lg';
+  shadowSize?: "sm" | "md" | "lg";
 }
 
 export const BrutalCard: React.FC<BrutalCardProps> = ({
@@ -15,16 +20,19 @@ export const BrutalCard: React.FC<BrutalCardProps> = ({
   style,
   alt = false,
   accentColor,
-  shadowSize = 'md',
+  shadowSize = "md",
 }) => {
-  const shadowOffset = shadowSize === 'sm' ? 2 : shadowSize === 'lg' ? 6 : 4;
+  const BrutalColors = useBrutalTheme();
+  const styles = useBrutalStyles(createStyles);
+  const shadowOffset = shadowSize === "sm" ? 2 : shadowSize === "lg" ? 6 : 4;
 
   return (
     <View
       style={[
         styles.card,
         {
-          backgroundColor: accentColor || (alt ? BrutalColors.bgCardAlt : BrutalColors.bgCard),
+          backgroundColor:
+            accentColor || (alt ? BrutalColors.bgCardAlt : BrutalColors.bgCard),
           ...Platform.select({
             web: {
               boxShadow: `${shadowOffset}px ${shadowOffset}px 0px ${BrutalColors.border}`,
@@ -46,11 +54,12 @@ export const BrutalCard: React.FC<BrutalCardProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  card: {
-    borderWidth: 3,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
-    padding: 16,
-  },
-});
+const createStyles = (BrutalColors: BrutalPalette) =>
+  StyleSheet.create({
+    card: {
+      borderWidth: 3,
+      borderColor: BrutalColors.border,
+      borderRadius: 4,
+      padding: 16,
+    },
+  });
