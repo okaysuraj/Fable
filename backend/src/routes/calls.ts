@@ -3,11 +3,19 @@ import { z } from "zod";
 import type { Prisma, Call } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { AuthRequest } from "../lib/auth.js";
-import { accessibleChannel, channelScope, lockChannel } from "../lib/access.js";
+import { accessibleChannel, lockChannel } from "../lib/access.js";
 import { asyncRoute, HttpError, parse } from "../lib/http.js";
 
 export const callsRouter = Router();
 const live = ["ringing", "active"];
+// Incoming calls follow the participant's authorized chats across all their groups.
+const participantChannelScope = (
+  req: AuthRequest,
+): Prisma.ChannelWhereInput => ({
+  workspace: { members: { some: { userId: req.auth!.userId } } },
+  isPrivate: true,
+  members: { some: { userId: req.auth!.userId } },
+});
 const sdp = z.string().min(10).max(48000).startsWith("v=0");
 // No public STUN service is contacted by default. A LAN needs no provider.
 const iceSchema = z
@@ -76,12 +84,21 @@ callsRouter.get(
         where: {
           calleeId: req.auth!.userId,
           status: "ringing",
-          channel: channelScope(req),
+          channel: participantChannelScope(req),
         },
         orderBy: { createdAt: "desc" },
       });
     });
-    res.json({ data: result ? dto(result) : null });
+    const caller = result
+      ? await prisma.user.findUnique({
+          where: { id: result.callerId },
+          select: { name: true },
+        })
+      : null;
+    res.json({
+      data: result ? dto(result) : null,
+      callerName: caller?.name ?? null,
+    });
   }),
 );
 callsRouter.post(
@@ -160,12 +177,14 @@ callsRouter.post(
     const target = await prisma.call.findFirst({
       where: {
         id: req.params.id,
-        channel: channelScope(req),
+        channel: participantChannelScope(req),
         OR: [{ callerId: req.auth!.userId }, { calleeId: req.auth!.userId }],
       },
-      select: { channelId: true },
+      select: { channelId: true, channel: { select: { workspaceId: true } } },
     });
     if (!target) throw new HttpError(404, "Call not found");
+    // Resolve the workspace from the authorized call rather than the open conversation.
+    req.auth!.workspaceId = target.channel.workspaceId;
     const result = await prisma.$transaction(async (tx) => {
       await lockChannel(tx, target.channelId);
       await accessibleChannel(req, target.channelId, tx);

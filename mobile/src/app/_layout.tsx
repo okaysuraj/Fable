@@ -36,7 +36,9 @@ function Routes() {
   return (
     <>
       <StatusBar
-        barStyle={colors.bgPaper === "#FFFFFF" ? "dark-content" : "light-content"}
+        barStyle={
+          colors.bgPaper === "#FFFFFF" ? "dark-content" : "light-content"
+        }
         backgroundColor={colors.bgPaper}
       />
       <Stack

@@ -7,11 +7,12 @@ import { AuthRequest } from "../lib/auth.js";
 import { asyncRoute, HttpError, parse } from "../lib/http.js";
 import {
   accessibleChannel,
-  canManageChannel,
   channelScope,
   lockChannel,
   lockWorkspace,
   workspaceActor,
+  publicUserSelect,
+  formatUser,
 } from "../lib/access.js";
 import { messagePage } from "../lib/messageHistory.js";
 import { directoryPage, directoryQuery } from "../lib/directory.js";
@@ -52,12 +53,29 @@ export async function formatChannels(
     FROM "Channel" c WHERE c."id" IN (${Prisma.join(channels.map((channel) => channel.id))})
   `);
   const byId = new Map(metrics.map((metric) => [metric.id, metric]));
+  const memberships = await db.workspaceMember.findMany({
+    where: {
+      workspaceId: {
+        in: [...new Set(channels.map((channel) => channel.workspaceId))],
+      },
+      userId: req.auth!.userId,
+    },
+    select: { workspaceId: true, role: true },
+  });
+  const roles = new Map(
+    memberships.map((membership) => [membership.workspaceId, membership.role]),
+  );
+  const mayManage = (
+    channel: Pick<ChannelRecord, "createdById" | "workspaceId">,
+  ) =>
+    channel.createdById === req.auth!.userId ||
+    ["owner", "admin"].includes(roles.get(channel.workspaceId) ?? "");
   const peers = await db.channelMember.findMany({
     where: {
       channelId: { in: channels.filter((c) => c.directKey).map((c) => c.id) },
       userId: { not: req.auth!.userId },
     },
-    select: { channelId: true, user: { select: { name: true } } },
+    select: { channelId: true, user: { select: publicUserSelect } },
   });
   const previews = await db.channel.findMany({
     where: { id: { in: channels.map((c) => c.id) } },
@@ -82,6 +100,14 @@ export async function formatChannels(
         "Direct conversation"
       : channel.name,
     isDirect: Boolean(directKey),
+    peer: directKey
+      ? (() => {
+          const peer = peers.find(
+            (person) => person.channelId === channel.id,
+          )?.user;
+          return peer ? formatUser(peer) : null;
+        })()
+      : null,
     lastMessage: (() => {
       const message = previews.find((row) => row.id === channel.id)
         ?.messages[0];
@@ -95,9 +121,8 @@ export async function formatChannels(
     memberCount: byId.get(channel.id)!.memberCount,
     unreadCount: byId.get(channel.id)!.unreadCount,
     activeCall: null,
-    canManageChannel: !directKey && canManageChannel(channel, req),
-    canManageMembers:
-      !directKey && channel.isPrivate && canManageChannel(channel, req),
+    canManageChannel: !directKey && mayManage(channel),
+    canManageMembers: !directKey && channel.isPrivate && mayManage(channel),
     canLeave:
       !directKey &&
       channel.isPrivate &&
@@ -118,12 +143,16 @@ export const channelSelect = {
 channelsRouter.get(
   "/",
   asyncRoute(async (req: AuthRequest, res) => {
-    const { limit, after, q, allWorkspaces } = parse(directoryQuery.extend({ allWorkspaces: z.enum(["true"]).optional() }), req.query);
+    const { limit, after, q, allWorkspaces } = parse(
+      directoryQuery.extend({ allWorkspaces: z.enum(["true"]).optional() }),
+      req.query,
+    );
     const result = await prisma.$transaction(
       async (tx) => {
-        req.auth!.workspaceRole = (
-          await workspaceActor(tx, req, req.auth!.workspaceId!)
-        ).role;
+        if (!allWorkspaces)
+          req.auth!.workspaceRole = (
+            await workspaceActor(tx, req, req.auth!.workspaceId!)
+          ).role;
         const search: Prisma.ChannelWhereInput = q
           ? {
               OR: [
@@ -142,7 +171,20 @@ channelsRouter.get(
             }
           : {};
         const scope: Prisma.ChannelWhereInput = {
-          AND: [allWorkspaces ? { workspace: { members: { some: { userId: req.auth!.userId } } }, OR: [{ isPrivate: false }, { members: { some: { userId: req.auth!.userId } } }] } : channelScope(req), search],
+          AND: [
+            allWorkspaces
+              ? {
+                  workspace: {
+                    members: { some: { userId: req.auth!.userId } },
+                  },
+                  OR: [
+                    { isPrivate: false },
+                    { members: { some: { userId: req.auth!.userId } } },
+                  ],
+                }
+              : channelScope(req),
+            search,
+          ],
         };
         const cursor = after
           ? await tx.channel.findFirst({
@@ -261,31 +303,110 @@ channelsRouter.get(
     res.json({ data });
   }),
 );
-channelsRouter.post("/groups", asyncRoute(async (req: AuthRequest, res) => {
-  const input = parse(z.object({ name: z.string().trim().min(1).max(80), memberIds: z.array(z.string().min(1).max(128)).min(1).max(99), clientMutationId: z.string().min(8).max(128) }).strict(), req.body);
-  const members = [...new Set(input.memberIds)].filter((id) => id !== req.auth!.userId).sort();
-  if (!members.length) throw new HttpError(400, "Select at least one other person");
-  const digest = createHash("sha256").update(JSON.stringify([req.auth!.userId, input.clientMutationId])).digest("hex");
-  const id = "group_" + digest;
-  const workspaceId = "group_space_" + digest;
-  const data = await prisma.$transaction(async (tx) => {
-    await lockWorkspace(tx, workspaceId);
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('group-create'), hashtext(${id}))`;
-    const existing = await tx.channel.findUnique({ where: { id }, include: { members: { select: { userId: true } } } });
-    if (existing) {
-      const existingMembers = existing.members.map((member) => member.userId).filter((member) => member !== req.auth!.userId).sort();
-      if (existing.name !== input.name || JSON.stringify(existingMembers) !== JSON.stringify(members)) throw new HttpError(409, "This group request was already used. Reopen New Group to start a different group.");
-      return (await formatChannels([existing], req, tx))[0];
-    }
-    const count = await tx.user.count({ where: { id: { in: members }, account: { isNot: null } } });
-    if (count !== members.length) throw new HttpError(400, "Some selected people are no longer available. Refresh your contacts.");
-    await tx.workspace.create({ data: { id: workspaceId, name: input.name, members: { create: [req.auth!.userId, ...members].map((userId) => ({ userId, role: userId === req.auth!.userId ? "owner" : "member" })) } } });
-    const created = await tx.channel.create({ data: { id, workspaceId, createdById: req.auth!.userId, name: input.name, isPrivate: true, type: "text", members: { create: [req.auth!.userId, ...members].map((userId) => ({ userId })) } }, select: channelSelect });
-    await tx.auditEvent.create({ data: { workspaceId, actorId: req.auth!.userId, action: "channel.create", targetId: created.id } });
-    return (await formatChannels([created], req, tx))[0];
-  });
-  res.status(201).json({ data });
-}));
+channelsRouter.post(
+  "/groups",
+  asyncRoute(async (req: AuthRequest, res) => {
+    const input = parse(
+      z
+        .object({
+          name: z.string().trim().min(1).max(80),
+          memberIds: z.array(z.string().min(1).max(128)).min(1).max(99),
+          clientMutationId: z.string().min(8).max(128),
+        })
+        .strict(),
+      req.body,
+    );
+    const members = [...new Set(input.memberIds)]
+      .filter((id) => id !== req.auth!.userId)
+      .sort();
+    if (!members.length)
+      throw new HttpError(400, "Select at least one other person");
+    const digest = createHash("sha256")
+      .update(JSON.stringify([req.auth!.userId, input.clientMutationId]))
+      .digest("hex");
+    const id = "group_" + digest;
+    const workspaceId = "group_space_" + digest;
+    const data = await prisma.$transaction(async (tx) => {
+      await lockWorkspace(tx, workspaceId);
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('group-create'), hashtext(${id}))`;
+      const existing = await tx.channel.findUnique({
+        where: { id },
+        include: { members: { select: { userId: true } } },
+      });
+      if (existing) {
+        const membership = await tx.workspaceMember.findUnique({
+          where: {
+            workspaceId_userId: { workspaceId, userId: req.auth!.userId },
+          },
+        });
+        const enrolled = existing.members.some(
+          (member) => member.userId === req.auth!.userId,
+        );
+        if (!membership || !enrolled)
+          throw new HttpError(404, "This group is no longer accessible");
+        const existingMembers = existing.members
+          .map((member) => member.userId)
+          .filter((member) => member !== req.auth!.userId)
+          .sort();
+        if (
+          existing.name !== input.name ||
+          JSON.stringify(existingMembers) !== JSON.stringify(members)
+        )
+          throw new HttpError(
+            409,
+            "This group request was already used. Reopen New Group to start a different group.",
+          );
+        return (await formatChannels([existing], req, tx))[0];
+      }
+      const count = await tx.user.count({
+        where: { id: { in: members }, account: { isNot: null } },
+      });
+      if (count !== members.length)
+        throw new HttpError(
+          400,
+          "Some selected people are no longer available. Refresh your contacts.",
+        );
+      await tx.workspace.create({
+        data: {
+          id: workspaceId,
+          name: input.name,
+          members: {
+            create: [req.auth!.userId, ...members].map((userId) => ({
+              userId,
+              role: userId === req.auth!.userId ? "owner" : "member",
+            })),
+          },
+        },
+      });
+      const created = await tx.channel.create({
+        data: {
+          id,
+          workspaceId,
+          createdById: req.auth!.userId,
+          name: input.name,
+          isPrivate: true,
+          type: "text",
+          members: {
+            create: [req.auth!.userId, ...members].map((userId) => ({
+              userId,
+            })),
+          },
+        },
+        select: channelSelect,
+      });
+      await tx.auditEvent.create({
+        data: {
+          workspaceId,
+          actorId: req.auth!.userId,
+          action: "channel.create",
+          targetId: created.id,
+        },
+      });
+      return (await formatChannels([created], req, tx))[0];
+    });
+    res.status(201).json({ data });
+  }),
+);
 
 channelsRouter.post(
   "/",

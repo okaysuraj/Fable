@@ -20,6 +20,7 @@ export type ChannelType = "text" | "audio" | "video";
 
 export interface Channel {
   workspaceId: string;
+  peer?: User | null;
   isDirect?: boolean;
   lastMessage?: { text: string; timestamp: string } | null;
   id: string;

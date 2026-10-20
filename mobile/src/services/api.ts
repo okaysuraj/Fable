@@ -93,12 +93,49 @@ function directoryQuery(options: DirectoryOptions = {}) {
 }
 
 export const api = {
-  matchContacts: async (numbers: string[], signal?: AbortSignal) => (await request<{ data: User[] }>("/contacts/match", { method: "POST", body: JSON.stringify({ numbers }), signal })).data,
-  contactDirect: async (userId: string) => (await request<{ data: Channel }>("/contacts/direct", { method: "POST", body: JSON.stringify({ userId }) })).data,
-  createGroup: async (name: string, memberIds: string[], clientMutationId: string) => (await request<{ data: Channel }>("/channels/groups", { method: "POST", body: JSON.stringify({ name, memberIds, clientMutationId }) })).data,
-  updateProfilePhoto: async (bytes: ArrayBuffer) => (await request<{ user: User }>("/auth/profile/photo", { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: bytes })).user,
-  removeProfilePhoto: async () => (await request<{ user: User }>("/auth/profile/photo", { method: "DELETE" })).user,
-  uploadMedia: async (channelId: string, name: string, bytes: ArrayBuffer, workspaceId?: string) =>
+  matchContacts: async (numbers: string[], signal?: AbortSignal) =>
+    (
+      await request<{ data: User[] }>("/contacts/match", {
+        method: "POST",
+        body: JSON.stringify({ numbers }),
+        signal,
+      })
+    ).data,
+  contactDirect: async (userId: string) =>
+    (
+      await request<{ data: Channel }>("/contacts/direct", {
+        method: "POST",
+        body: JSON.stringify({ userId }),
+      })
+    ).data,
+  createGroup: async (
+    name: string,
+    memberIds: string[],
+    clientMutationId: string,
+  ) =>
+    (
+      await request<{ data: Channel }>("/channels/groups", {
+        method: "POST",
+        body: JSON.stringify({ name, memberIds, clientMutationId }),
+      })
+    ).data,
+  updateProfilePhoto: async (bytes: ArrayBuffer) =>
+    (
+      await request<{ user: User }>("/auth/profile/photo", {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: bytes,
+      })
+    ).user,
+  removeProfilePhoto: async () =>
+    (await request<{ user: User }>("/auth/profile/photo", { method: "DELETE" }))
+      .user,
+  uploadMedia: async (
+    channelId: string,
+    name: string,
+    bytes: ArrayBuffer,
+    workspaceId?: string,
+  ) =>
     (
       await request<{ data: MediaAsset }>(
         `/media/${encodeURIComponent(channelId)}?name=${encodeURIComponent(name)}`,
@@ -106,7 +143,9 @@ export const api = {
           method: "POST",
           headers: { "Content-Type": "application/octet-stream" },
           body: bytes,
-        }, "json", workspaceId,
+        },
+        "json",
+        workspaceId,
       )
     ).data,
   downloadMedia: (id: string) =>
@@ -139,7 +178,10 @@ export const api = {
         }[];
       };
     }>("/calls/config"),
-  incomingCall: () => request<{ data: CallSession | null }>("/calls/incoming"),
+  incomingCall: () =>
+    request<{ data: CallSession | null; callerName?: string | null }>(
+      "/calls/incoming",
+    ),
   startCall: (channelId: string, kind: "audio" | "video", offer: string) =>
     request<{ data: CallSession }>("/calls", {
       method: "POST",
@@ -247,11 +289,19 @@ export const api = {
       body: JSON.stringify({ token }),
     }),
   fetchChannelDirectory: (options: DirectoryOptions = {}) =>
-    request<DirectoryPage<Channel>>(`/channels?${directoryQuery(options)}&allWorkspaces=true`, {
-      signal: options.signal,
-    }),
+    request<DirectoryPage<Channel>>(
+      `/channels?${directoryQuery(options)}&allWorkspaces=true`,
+      {
+        signal: options.signal,
+      },
+    ),
   async fetchChannels(options: DirectoryOptions = {}): Promise<Channel[]> {
-    return (await request<DirectoryPage<Channel>>(`/channels?${directoryQuery(options)}`, { signal: options.signal })).data;
+    return (
+      await request<DirectoryPage<Channel>>(
+        `/channels?${directoryQuery(options)}`,
+        { signal: options.signal },
+      )
+    ).data;
   },
   async fetchChannel(
     id: string,
@@ -442,14 +492,19 @@ export const api = {
     workspaceId?: string,
   ): Promise<Message> {
     return (
-      await request<{ data: Message }>("/messages", {
-        method: "POST",
-        body: JSON.stringify({
-          channelId,
-          content,
-          ...options,
-        }),
-      }, "json", workspaceId)
+      await request<{ data: Message }>(
+        "/messages",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            channelId,
+            content,
+            ...options,
+          }),
+        },
+        "json",
+        workspaceId,
+      )
     ).data;
   },
   async toggleReaction(messageId: string, icon: string): Promise<Message> {

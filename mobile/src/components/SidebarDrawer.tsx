@@ -10,7 +10,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Fonts } from "@/constants/theme";
-import { useBrutalStyles, useBrutalTheme, type BrutalPalette } from "@/hooks/use-brutal-theme";
+import {
+  useBrutalStyles,
+  useBrutalTheme,
+  type BrutalPalette,
+} from "@/hooks/use-brutal-theme";
 import { Channel, User } from "@/types/chat";
 import { api } from "@/services/api";
 import { MonogramAvatar } from "./brutal/MonogramAvatar";
@@ -20,6 +24,7 @@ import { SearchField } from "./ui/SearchField";
 import { NavigationMenuButton } from "./NavigationDrawer";
 import { AppIcon } from "./ui/AppIcon";
 import { MotionPressable as Pressable } from "./ui/MotionPressable";
+import { UserAvatar } from "./ui/UserAvatar";
 
 interface Props {
   currentUserId: string;
@@ -103,11 +108,7 @@ export function SidebarDrawer({
         const isSelf = item.person.id === currentUserId;
         const content = (
           <>
-            <MonogramAvatar
-              monogram={item.person.monogram}
-              size={46}
-              backgroundColor={item.person.avatarColor}
-            />
+            <UserAvatar user={item.person} size={46} />
             <View style={styles.rowBody}>
               <Text style={styles.name} numberOfLines={1}>
                 {item.person.name}
@@ -123,7 +124,9 @@ export function SidebarDrawer({
             {pendingPerson === item.person.id ? (
               <ActivityIndicator />
             ) : (
-              !isSelf && <AppIcon name="forward" color={colors.inkFaint} size={18} />
+              !isSelf && (
+                <AppIcon name="forward" color={colors.inkFaint} size={18} />
+              )
             )}
           </>
         );
@@ -155,11 +158,15 @@ export function SidebarDrawer({
             onSelectChannel(chat.id, chat.workspaceId);
           }}
         >
-          <MonogramAvatar
-            monogram={chat.name.slice(0, 2).toUpperCase()}
-            size={46}
-            backgroundColor="#DCE5EF"
-          />
+          {chat.peer ? (
+            <UserAvatar user={chat.peer} size={46} />
+          ) : (
+            <MonogramAvatar
+              monogram={chat.name.slice(0, 2).toUpperCase()}
+              size={46}
+              backgroundColor="#DCE5EF"
+            />
+          )}
           <View style={styles.rowBody}>
             <Text style={styles.name} numberOfLines={1}>
               {chat.name}
@@ -194,7 +201,22 @@ export function SidebarDrawer({
         <Text accessibilityRole="header" style={styles.heading}>
           {showPeople ? "People" : "Chats"}
         </Text>
-        {!showPeople && <Pressable accessibilityRole="button" accessibilityLabel="Take a photo to send" accessibilityState={{ busy: cameraBusy }} disabled={cameraBusy} onPress={onOpenCamera} style={styles.iconButton}>{cameraBusy ? <ActivityIndicator color={colors.primary} /> : <AppIcon name="camera" size={26} />}</Pressable>}
+        {!showPeople && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Take a photo to send"
+            accessibilityState={{ busy: cameraBusy }}
+            disabled={cameraBusy}
+            onPress={onOpenCamera}
+            style={styles.iconButton}
+          >
+            {cameraBusy ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : (
+              <AppIcon name="camera" size={26} />
+            )}
+          </Pressable>
+        )}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="New chat"
@@ -301,7 +323,7 @@ const createStyles = (colors: BrutalPalette) =>
       alignItems: "center",
       padding: 12,
       gap: 12,
-      minHeight: 86,
+      minHeight: 78,
       borderRadius: 11,
       marginBottom: 2,
     },

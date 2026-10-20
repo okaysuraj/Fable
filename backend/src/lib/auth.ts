@@ -144,7 +144,17 @@ async function attachDatabaseIdentity(
             !["/audit", "/invitations"].includes(workspacePath)))) ||
         (req.method === "POST" && ["/", "/join"].includes(workspacePath)));
     const personalRoute =
-      req.baseUrl === "/api/auth" || req.baseUrl === "/api/settings" || req.baseUrl === "/api/contacts" || (req.baseUrl === "/api/channels" && req.method === "POST" && req.path === "/groups");
+      req.baseUrl === "/api/auth" ||
+      req.baseUrl === "/api/settings" ||
+      req.baseUrl === "/api/contacts" ||
+      (req.baseUrl === "/api/calls" &&
+        ((req.method === "GET" && req.path === "/incoming") ||
+          (req.method === "POST" && /^\/[^/]+$/.test(workspacePath)))) ||
+      (req.baseUrl === "/api/channels" &&
+        ((req.method === "POST" && req.path === "/groups") ||
+          (req.method === "GET" &&
+            req.path === "/" &&
+            req.query.allWorkspaces === "true")));
     const membership = await prisma.workspaceMember.findFirst({
       where: {
         userId: account.userId,

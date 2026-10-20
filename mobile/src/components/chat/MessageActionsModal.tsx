@@ -27,6 +27,7 @@ interface Props {
   message: Message;
   permissions: MessageActionPermissions;
   onClose: () => void;
+  onReply: () => void;
   onEdit: (message: Message, content: string) => Promise<void>;
   onDelete: (message: Message) => Promise<void>;
   onPin: (message: Message, isPinned: boolean) => Promise<void>;
@@ -37,6 +38,7 @@ export function MessageActionsModal({
   message,
   permissions,
   onClose,
+  onReply,
   onEdit,
   onDelete,
   onPin,
@@ -129,7 +131,9 @@ export function MessageActionsModal({
                     {message.content}
                   </Text>
                 ) : (
-                  <Text style={styles.preview}>Code snippet</Text>
+                  <Text style={styles.preview}>
+                    {message.attachments?.[0]?.name || "Code snippet"}
+                  </Text>
                 )}
                 {!message.deletedAt && (
                   <View style={styles.reactions}>
@@ -171,6 +175,13 @@ export function MessageActionsModal({
                       );
                     })}
                   </View>
+                )}
+                {!message.deletedAt && (
+                  <BrutalButton
+                    title="Reply"
+                    variant="outline"
+                    onPress={onReply}
+                  />
                 )}
                 {permissions.edit && (
                   <BrutalButton

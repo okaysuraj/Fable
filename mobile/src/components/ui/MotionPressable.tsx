@@ -24,22 +24,46 @@ export function MotionPressable({
   const [pressed, setPressed] = useState(false);
   const [hovered, setHovered] = useState(false);
   const scale = useSharedValue(1);
-  const motion = useAnimatedStyle(() => ({ transform: [{ scale: scale.get() }] }));
+  const motion = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.get() }],
+  }));
   return (
     <AnimatedPressable
       {...props}
       ref={ref}
-      style={[typeof style === "function" ? style({ pressed, hovered }) : style, motion]}
-      onHoverIn={(event) => { setHovered(true); onHoverIn?.(event); }}
-      onHoverOut={(event) => { setHovered(false); onHoverOut?.(event); }}
+      style={[
+        typeof style === "function" ? style({ pressed, hovered }) : style,
+        motion,
+      ]}
+      onHoverIn={(event) => {
+        setHovered(true);
+        onHoverIn?.(event);
+      }}
+      onHoverOut={(event) => {
+        setHovered(false);
+        onHoverOut?.(event);
+      }}
       onPressIn={(event) => {
         setPressed(true);
-        scale.set(withTiming(feedbackScale, { duration: 90, reduceMotion: ReduceMotion.System }));
+        scale.set(
+          withTiming(feedbackScale, {
+            duration: 90,
+            reduceMotion: ReduceMotion.System,
+          }),
+        );
         onPressIn?.(event);
       }}
       onPressOut={(event) => {
         setPressed(false);
-        scale.set(withSpring(1, { stiffness: 420, damping: 30, mass: 0.7, overshootClamping: true, reduceMotion: ReduceMotion.System }));
+        scale.set(
+          withSpring(1, {
+            stiffness: 420,
+            damping: 30,
+            mass: 0.7,
+            overshootClamping: true,
+            reduceMotion: ReduceMotion.System,
+          }),
+        );
         onPressOut?.(event);
       }}
     />

@@ -17,6 +17,7 @@ import React, {
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -31,7 +32,9 @@ import { MediaComposer } from "./MediaComposer";
 import { MediaPreviewProvider } from "./MediaPreviewContext";
 import { BrutalInput } from "../brutal/BrutalInput";
 import { MessageActionsModal } from "./MessageActionsModal";
-import { NavigationMenuButton } from "../NavigationDrawer";
+import { UserAvatar } from "../ui/UserAvatar";
+import { MonogramAvatar } from "../brutal/MonogramAvatar";
+import { ChatWallpaper } from "./ChatWallpaper";
 import { AppIcon } from "../ui/AppIcon";
 import { MotionPressable as Pressable } from "../ui/MotionPressable";
 
@@ -49,6 +52,8 @@ interface MobileChatViewProps {
   onToggleReaction: (messageId: string, icon: string) => void;
   onToggleDrawer: () => void;
   onOpenNavigation: () => void;
+  onOpenChatDetails: () => void;
+  onOpenMessageSearch: () => void;
   highlightedMessageId?: string | null;
   loading?: boolean;
   onEditMessage: (message: Message, content: string) => Promise<void>;
@@ -83,6 +88,8 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
   onToggleReaction,
   onToggleDrawer,
   onOpenNavigation,
+  onOpenChatDetails,
+  onOpenMessageSearch,
   highlightedMessageId,
   loading = false,
   archive,
@@ -111,6 +118,7 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
   const calling = useCalling();
   const [reply, setReply] = useState<Message | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const { presence, available } = useConversationPresence(
     channel.id,
     inputText,
@@ -150,9 +158,25 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
     [onActionMessageChanged],
   );
   const renderMessageItem = useCallback(
-    ({ item }: { item: Message }) => (
+    ({ item, index }: { item: Message; index: number }) => (
       <MessageRow
         item={item}
+        showSender={
+          !channel.isDirect &&
+          (index === reversedMessages.length - 1 ||
+            reversedMessages[index + 1]?.sender.id !== item.sender.id)
+        }
+        dayLabel={
+          index === reversedMessages.length - 1 ||
+          new Date(reversedMessages[index + 1].timestamp).toDateString() !==
+            new Date(item.timestamp).toDateString()
+            ? new Intl.DateTimeFormat(undefined, {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              }).format(new Date(item.timestamp))
+            : undefined
+        }
         sender={profiles.get(item.sender.id) || item.sender}
         onToggleReaction={onToggleReaction}
         onOpenActions={openActions}
@@ -191,6 +215,7 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
       messages,
       presence,
       channel.isDirect,
+      reversedMessages,
     ],
   );
   useEffect(() => {
@@ -268,6 +293,7 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
           style={styles.container}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
+          <ChatWallpaper />
           <View style={styles.header}>
             {!hideBackButton && (
               <Pressable
@@ -275,36 +301,49 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
                 accessibilityLabel="Back to chats"
                 onPress={onToggleDrawer}
                 style={styles.menuBtn}
-                hitSlop={8}
               >
-                <AppIcon name="back" size={25} />
-                <Text style={styles.menuBtnText}>Chats</Text>
+                <AppIcon
+                  name="back"
+                  size={26}
+                  color={BrutalColors.chatAccent}
+                />
               </Pressable>
             )}
-            <View style={styles.channelMeta}>
-              <View style={styles.channelTitleRow}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                channel.isDirect ? "Contact information" : "Group information"
+              }
+              onPress={onOpenChatDetails}
+              style={styles.identity}
+            >
+              {channel.peer ? (
+                <UserAvatar user={channel.peer} size={40} />
+              ) : (
+                <MonogramAvatar
+                  monogram={channel.name.slice(0, 2).toUpperCase()}
+                  size={40}
+                  backgroundColor="#D3E9DE"
+                />
+              )}
+              <View style={styles.channelMeta}>
                 <Text style={styles.channelTitle} numberOfLines={1}>
                   {channel.name}
                 </Text>
+                <Text style={styles.channelTopic} numberOfLines={1}>
+                  {presence?.typing.length
+                    ? "typing…"
+                    : channel.isDirect
+                      ? channel.peer?.status === "online"
+                        ? "online"
+                        : "Tap here for contact info"
+                      : `${channel.memberCount} members`}
+                </Text>
               </View>
-              <Text style={styles.channelTopic} numberOfLines={1}>
-                {channel.topic ||
-                  `${channel.memberCount} ${channel.memberCount === 1 ? "person" : "people"}`}
-              </Text>
-            </View>
+            </Pressable>
             <View style={styles.headerActions}>
               {channel.isDirect && (
                 <>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Start audio call"
-                    onPress={() =>
-                      calling.start(channel.id, "audio", channel.name)
-                    }
-                    style={styles.headerActionBtn}
-                  >
-                    <AppIcon name="call" size={23} />
-                  </Pressable>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Start video call"
@@ -313,11 +352,44 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
                     }
                     style={styles.headerActionBtn}
                   >
-                    <AppIcon name="video" size={25} />
+                    <AppIcon
+                      name="video"
+                      size={25}
+                      color={BrutalColors.chatAccent}
+                    />
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Start audio call"
+                    onPress={() =>
+                      calling.start(channel.id, "audio", channel.name)
+                    }
+                    style={styles.headerActionBtn}
+                  >
+                    <AppIcon
+                      name="call"
+                      size={23}
+                      color={BrutalColors.chatAccent}
+                    />
                   </Pressable>
                 </>
               )}
-              <NavigationMenuButton onPress={onOpenNavigation} />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Chat options"
+                accessibilityState={{ expanded: headerMenuOpen }}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setHeaderMenuOpen(!headerMenuOpen);
+                }}
+                style={styles.headerActionBtn}
+              >
+                <AppIcon
+                  name={Platform.OS === "ios" ? "more" : "moreVertical"}
+                  size={25}
+                  color={BrutalColors.chatAccent}
+                />
+              </Pressable>
             </View>
           </View>
           {(showPinned || pinnedMessages.length > 0 || hasOlderPins) && (
@@ -618,86 +690,133 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
               {sendError}
             </Text>
           ) : null}
-          {channel.type === "text" && (
+          {channel.type === "text" ? (
             <MediaComposer
               channelId={channel.id}
               disabled={sending}
               assets={assets}
               onUploaded={(asset) =>
                 setAssets((previous) =>
-                  previous.some((a) => a.id === asset.id)
+                  previous.some((item) => item.id === asset.id)
                     ? previous
                     : [...previous, asset],
                 )
               }
               onRemoved={(id) =>
-                setAssets((previous) => previous.filter((a) => a.id !== id))
+                setAssets((previous) =>
+                  previous.filter((asset) => asset.id !== id),
+                )
               }
               onBusy={setMediaBusy}
-            />
-          )}
-          {channel.type === "text" ? (
-            <View style={styles.inputDock}>
+              endControl={
+                inputText.trim() || assets.length || sending ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Send message"
+                    accessibilityState={{
+                      busy: sending,
+                      disabled: sending || mediaBusy,
+                    }}
+                    disabled={sending || mediaBusy}
+                    onPress={() => void handleSend()}
+                    style={[
+                      styles.sendBtn,
+                      (sending || mediaBusy) && { opacity: 0.5 },
+                    ]}
+                  >
+                    {sending ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <AppIcon name="send" size={23} color="#FFFFFF" />
+                    )}
+                  </Pressable>
+                ) : undefined
+              }
+            >
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Choose emoji"
                 accessibilityState={{ expanded: emojiOpen }}
-                onPress={() => setEmojiOpen(!emojiOpen)}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setEmojiOpen(!emojiOpen);
+                }}
                 style={{
-                  minWidth: 44,
+                  minWidth: 42,
                   minHeight: 48,
-                  alignItems: "center",
                   justifyContent: "center",
+                  alignItems: "center",
                 }}
               >
-                <AppIcon name="emoji" size={27} />
+                <AppIcon
+                  name="emoji"
+                  size={25}
+                  color={BrutalColors.chatMuted}
+                />
               </Pressable>
               <BrutalInput
                 accessibilityLabel="Message"
                 value={inputText}
-                editable={!sending}
+                editable={!sending && !mediaBusy}
                 onChangeText={setInputText}
+                onFocus={() => setEmojiOpen(false)}
                 placeholder="Message"
                 maxLength={10000}
                 multiline
                 submitBehavior="newline"
                 style={styles.chatInput}
               />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Send message"
-                accessibilityState={{
-                  disabled:
-                    sending ||
-                    mediaBusy ||
-                    (!inputText.trim() && !assets.length),
-                  busy: sending,
-                }}
-                disabled={
-                  sending || mediaBusy || (!inputText.trim() && !assets.length)
-                }
-                onPress={() => {
-                  void handleSend();
-                }}
-                style={[
-                  styles.sendBtn,
-                  (sending ||
-                    mediaBusy ||
-                    (!inputText.trim() && !assets.length)) && { opacity: 0.5 },
-                ]}
-              >
-                {sending ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <AppIcon name="send" size={23} color="#FFFFFF" />
-                )}
-              </Pressable>
-            </View>
+            </MediaComposer>
           ) : (
             <Text style={[styles.messageText, { padding: 16 }]}>
-              Open a direct conversation for an audio or video call. Choose a
-              text chat to send messages.
+              Open a direct conversation for an audio or video call.
             </Text>
+          )}
+          {headerMenuOpen && (
+            <View style={styles.chatMenuLayer}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close chat options"
+                onPress={() => setHeaderMenuOpen(false)}
+                style={StyleSheet.absoluteFill}
+              />
+              <View style={styles.chatMenu}>
+                {[
+                  {
+                    title: "Search messages",
+                    icon: "search" as const,
+                    action: onOpenMessageSearch,
+                  },
+                  {
+                    title: channel.isDirect ? "Contact info" : "Group info",
+                    icon: "info" as const,
+                    action: onOpenChatDetails,
+                  },
+                  {
+                    title: "Account menu",
+                    icon: "menu" as const,
+                    action: onOpenNavigation,
+                  },
+                ].map((option) => (
+                  <Pressable
+                    key={option.title}
+                    accessibilityRole="button"
+                    onPress={() => {
+                      setHeaderMenuOpen(false);
+                      option.action();
+                    }}
+                    style={styles.chatMenuRow}
+                  >
+                    <AppIcon
+                      name={option.icon}
+                      size={22}
+                      color={BrutalColors.chatAccent}
+                    />
+                    <Text style={styles.chatMenuText}>{option.title}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
           )}
         </KeyboardAvoidingView>
         {selectedMessage && (
@@ -709,6 +828,10 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
               pin: selectedMessage.canPin,
             }}
             onClose={() => onActionMessageChanged(null)}
+            onReply={() => {
+              setReply(selectedMessage);
+              onActionMessageChanged(null);
+            }}
             onEdit={onEditMessage}
             onDelete={onDeleteMessage}
             onPin={onPinMessage}
@@ -721,6 +844,39 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
 };
 const createStyles = (BrutalColors: BrutalPalette) =>
   StyleSheet.create({
+    identity: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 9,
+      minHeight: 48,
+    },
+    chatMenuLayer: { ...StyleSheet.absoluteFill, zIndex: 50 },
+    chatMenu: {
+      position: "absolute",
+      top: 62,
+      right: 12,
+      width: 240,
+      backgroundColor: BrutalColors.chatHeader,
+      borderRadius: 16,
+      paddingVertical: 6,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: BrutalColors.border,
+      boxShadow: "0 8px 28px #00000022",
+    },
+    chatMenuRow: {
+      flexDirection: "row",
+      gap: 14,
+      alignItems: "center",
+      minHeight: 52,
+      paddingHorizontal: 18,
+    },
+    chatMenuText: {
+      fontFamily: Fonts.sans,
+      fontSize: 15,
+      color: BrutalColors.chatInk,
+    },
     historyButton: {
       paddingHorizontal: 12,
       paddingVertical: 12,
@@ -731,7 +887,7 @@ const createStyles = (BrutalColors: BrutalPalette) =>
     },
     safeArea: {
       flex: 1,
-      backgroundColor: BrutalColors.bgPaper,
+      backgroundColor: BrutalColors.chatBackground,
     },
     container: {
       flex: 1,
@@ -741,14 +897,14 @@ const createStyles = (BrutalColors: BrutalPalette) =>
       alignItems: "center",
       paddingHorizontal: 12,
       paddingVertical: 8,
-      backgroundColor: "transparent",
-      borderBottomWidth: 1,
+      backgroundColor: BrutalColors.chatHeader,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: BrutalColors.border,
       gap: 6,
     },
     menuBtn: {
       flexDirection: "row",
-      minWidth: 64,
+      minWidth: 34,
       minHeight: 48,
       borderWidth: 0,
       borderColor: BrutalColors.border,
@@ -790,9 +946,9 @@ const createStyles = (BrutalColors: BrutalPalette) =>
     channelTitle: {
       fontFamily: Fonts.sans,
       fontWeight: "400",
-      fontSize: 22,
-      lineHeight: 28,
-      color: BrutalColors.ink,
+      fontSize: 17,
+      lineHeight: 23,
+      color: BrutalColors.chatInk,
     },
     channelTopic: {
       fontFamily: Fonts.medium,
@@ -852,8 +1008,8 @@ const createStyles = (BrutalColors: BrutalPalette) =>
     },
     messagesList: {
       flexGrow: 1,
-      padding: 18,
-      gap: 13,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
     },
     messageText: {
       fontFamily: Fonts.medium,
@@ -874,23 +1030,23 @@ const createStyles = (BrutalColors: BrutalPalette) =>
     },
     chatInput: {
       flex: 1,
-      fontFamily: Fonts.sans,
-      fontSize: 18,
-      lineHeight: 25,
-      paddingVertical: 10,
-      maxHeight: 132,
-      textAlignVertical: "top",
-      backgroundColor: BrutalColors.bgCard,
-      borderColor: BrutalColors.controlBorder,
-      borderRadius: 23,
-      minHeight: 44,
+      minWidth: 0,
+      minHeight: 48,
+      maxHeight: 128,
+      borderWidth: 0,
+      backgroundColor: "transparent",
+      paddingHorizontal: 0,
+      paddingVertical: 12,
+      fontSize: 16,
+      lineHeight: 22,
+      color: BrutalColors.chatInk,
     },
     sendBtn: {
       width: 48,
       height: 48,
       borderWidth: 0,
       borderRadius: 24,
-      backgroundColor: BrutalColors.bubbleSent,
+      backgroundColor: BrutalColors.chatAccent,
       alignItems: "center",
       justifyContent: "center",
     },

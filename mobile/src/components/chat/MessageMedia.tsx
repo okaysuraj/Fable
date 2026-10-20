@@ -76,8 +76,16 @@ function AudioPlayback({ uri }: { uri: string }) {
     <View>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={status.playing ? "Pause audio message" : "Play audio message"}
-        style={{ padding: 14, minHeight: 48, flexDirection: "row", alignItems: "center", gap: 10 }}
+        accessibilityLabel={
+          status.playing ? "Pause audio message" : "Play audio message"
+        }
+        style={{
+          padding: 14,
+          minHeight: 48,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 10,
+        }}
         onPress={async () => {
           try {
             setError("");
@@ -93,8 +101,8 @@ function AudioPlayback({ uri }: { uri: string }) {
       >
         <AppIcon name={status.playing ? "pause" : "play"} size={24} />
         <Text style={{ color: colors.primary }}>
-          {status.playing ? "Pause" : "Play"} ·{" "}
-          {Math.floor(status.currentTime)} / {Math.floor(status.duration)}s
+          {status.playing ? "Pause" : "Play"} · {Math.floor(status.currentTime)}{" "}
+          / {Math.floor(status.duration)}s
         </Text>
       </Pressable>
       {!!error && (
@@ -124,7 +132,11 @@ export function MessageMedia({ asset }: { asset: MediaAsset }) {
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <AppIcon name="document" size={22} />
-        <Text style={{ color: colors.primary, fontWeight: "600", flexShrink: 1 }}>{asset.name}</Text>
+        <Text
+          style={{ color: colors.primary, fontWeight: "600", flexShrink: 1 }}
+        >
+          {asset.name}
+        </Text>
       </View>
       <Text style={{ color: colors.inkMuted, fontSize: 12 }}>
         {Math.ceil(asset.size / 1024)} KB · Open attachment

@@ -41,9 +41,6 @@ export function useChannelMessages({
 }: Options) {
   // Keep the draft mounted behind the phone list without acknowledging unseen messages.
   const conversationVisibleRef = useRef(conversationVisible);
-  useLayoutEffect(() => {
-    conversationVisibleRef.current = conversationVisible;
-  }, [conversationVisible]);
   const callbacks = useRef({ onAccessLost, onMetadataLoaded });
   useEffect(() => {
     callbacks.current = { onAccessLost, onMetadataLoaded };
@@ -54,6 +51,9 @@ export function useChannelMessages({
   const [messages, setMessages] = useState<Message[]>([]);
   const [pinnedMessages, setPinnedMessages] = useState<Message[]>([]);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
+  useLayoutEffect(() => {
+    conversationVisibleRef.current = conversationVisible && !actionMessage;
+  }, [conversationVisible, actionMessage]);
   const [messageError, setMessageError] = useState("");
   const [messagesLoading, setMessagesLoading] = useState(true);
   const [pinsLoading, setPinsLoading] = useState(true);

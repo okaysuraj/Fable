@@ -64,6 +64,7 @@ export const MonogramAvatar: React.FC<MonogramAvatarProps> = ({
           {
             width: size,
             height: size,
+            borderRadius: size / 2,
             backgroundColor: resolvedBackgroundColor,
           },
         ]}

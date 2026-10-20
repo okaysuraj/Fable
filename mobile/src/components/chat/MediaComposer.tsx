@@ -1,5 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { AppState, Platform, Text, View } from "react-native";
+import { choosePhoto } from "@/services/photos";
 import { AppIcon } from "../ui/AppIcon";
 import { MotionPressable as Pressable } from "../ui/MotionPressable";
 import * as DocumentPicker from "expo-document-picker";
@@ -28,6 +35,8 @@ export function MediaComposer({
   onUploaded,
   onRemoved,
   onBusy,
+  children,
+  endControl,
 }: {
   channelId: string;
   disabled: boolean;
@@ -35,6 +44,8 @@ export function MediaComposer({
   onUploaded: (asset: MediaAsset) => void;
   onRemoved: (id: string) => void;
   onBusy: (busy: boolean) => void;
+  children: ReactNode;
+  endControl?: ReactNode;
 }) {
   const colors = useBrutalTheme();
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -217,59 +228,134 @@ export function MediaComposer({
     };
   }, [recorder]);
   return (
-    <View style={{ paddingHorizontal: 12, gap: 6 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Attach photo, video or file"
-          disabled={
-            disabled || busy || status.isRecording || assets.length >= 4
-          }
-          style={{ padding: 12, minHeight: 48, minWidth: 48 }}
-          onPress={async () => {
-            setError("");
-            try {
-              const result = await DocumentPicker.getDocumentAsync({
-                copyToCacheDirectory: true,
-                multiple: false,
-              });
-              if (!result.canceled && result.assets[0])
-                await upload(result.assets[0].name, result.assets[0].uri);
-            } catch (failure) {
-              setError(
-                failure instanceof Error
-                  ? failure.message
-                  : "Could not choose this file.",
-              );
-            }
+    <View
+      style={{
+        paddingHorizontal: 6,
+        paddingVertical: 6,
+        gap: 6,
+        backgroundColor: colors.chatBackground,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 6 }}>
+        <View
+          style={{
+            flex: 1,
+            flexDirection: "row",
+            alignItems: "flex-end",
+            borderRadius: 25,
+            backgroundColor: colors.chatReceived,
+            paddingLeft: 4,
+            paddingRight: 2,
           }}
         >
-          <AppIcon name="attach" size={25} />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={
-            status.isRecording ? "Stop recording" : "Record audio message"
-          }
-          disabled={disabled || busy || assets.length >= 4}
-          style={{ padding: 12, minHeight: 48, minWidth: 48 }}
-          onPress={() => void toggle()}
-        >
-          <AppIcon name={status.isRecording ? "stop" : "microphone"} size={25}
-            color={status.isRecording ? colors.accentPink : colors.primary} />
-        </Pressable>
-        {status.isRecording && (
-          <Text
-            accessibilityLiveRegion="polite"
-            style={{ color: colors.accentPink }}
+          {children}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Attach photo, video or file"
+            disabled={
+              disabled || busy || status.isRecording || assets.length >= 4
+            }
+            style={{ padding: 12, minHeight: 48, minWidth: 48 }}
+            onPress={async () => {
+              setError("");
+              try {
+                const result = await DocumentPicker.getDocumentAsync({
+                  copyToCacheDirectory: true,
+                  multiple: false,
+                });
+                if (!result.canceled && result.assets[0])
+                  await upload(result.assets[0].name, result.assets[0].uri);
+              } catch (failure) {
+                setError(
+                  failure instanceof Error
+                    ? failure.message
+                    : "Could not choose this file.",
+                );
+              }
+            }}
           >
-            Recording · {Math.floor(status.durationMillis / 1000)}s
-          </Text>
-        )}
-        {busy && (
-          <Text style={{ color: colors.inkMuted }}>Preparing attachment…</Text>
+            <AppIcon name="attach" size={24} color={colors.chatMuted} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Take a photo for this chat"
+            disabled={
+              disabled || busy || status.isRecording || assets.length >= 4
+            }
+            style={{
+              minHeight: 48,
+              minWidth: 42,
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+            onPress={async () => {
+              if (inFlight.current || recordingOperation.current) return;
+              setBusy(true);
+              onBusy(true);
+              setError("");
+              try {
+                const photo = await choosePhoto("camera");
+                if (photo && mounted.current)
+                  await upload(photo.name, photo.uri);
+              } catch (failure) {
+                if (mounted.current)
+                  setError(
+                    failure instanceof Error
+                      ? failure.message
+                      : "Couldn't take this photo.",
+                  );
+              } finally {
+                if (mounted.current) {
+                  setBusy(false);
+                  onBusy(false);
+                }
+              }
+            }}
+          >
+            <AppIcon name="camera" size={24} color={colors.chatMuted} />
+          </Pressable>
+        </View>
+        {status.isRecording || !endControl ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              status.isRecording ? "Stop recording" : "Record audio message"
+            }
+            disabled={disabled || busy || assets.length >= 4}
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 24,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: status.isRecording
+                ? colors.dangerButton
+                : colors.chatAccent,
+            }}
+            onPress={() => void toggle()}
+          >
+            <AppIcon
+              name={status.isRecording ? "stop" : "microphone"}
+              size={25}
+              color="#FFFFFF"
+            />
+          </Pressable>
+        ) : (
+          endControl
         )}
       </View>
+      {status.isRecording ? (
+        <Text
+          accessibilityLiveRegion="polite"
+          style={{ color: colors.dangerButton, padding: 6 }}
+        >
+          Recording · {Math.floor(status.durationMillis / 1000)}s
+        </Text>
+      ) : busy ? (
+        <Text style={{ color: colors.chatMuted, padding: 6 }}>
+          Preparing attachment…
+        </Text>
+      ) : null}
       {assets.map((asset) => (
         <View
           key={asset.id}

@@ -118,7 +118,6 @@ export function CallingProvider({
     callRef.current = value;
     setCall(value);
   };
-  const isCurrentCall = (id: string) => callRef.current?.id === id;
   const finish = async (action: "end" | "decline" = "end") => {
     generation.current += 1;
     busy.current = false;
@@ -284,10 +283,7 @@ export function CallingProvider({
         remember(result.data);
         setPhase("incoming");
         setError("");
-        setName("Incoming call");
-        const channel = await api.fetchChannel(result.data.channelId);
-        if (mounted.current && isCurrentCall(result.data.id))
-          setName(channel.name);
+        setName(result.callerName || "Incoming call");
       } else {
         const result = await api.updateCall(current.id, "poll");
         if (
@@ -496,7 +492,11 @@ export function CallingProvider({
                         setMuted(!muted);
                       }}
                     >
-                      <AppIcon name={muted ? "microphoneOff" : "microphone"} size={25} color={colors.onPrimary} />
+                      <AppIcon
+                        name={muted ? "microphoneOff" : "microphone"}
+                        size={25}
+                        color={colors.onPrimary}
+                      />
                       <Text style={styles.buttonText}>
                         {muted ? "Unmute" : "Mute"}
                       </Text>
@@ -517,7 +517,11 @@ export function CallingProvider({
                         setCameraOff(!cameraOff);
                       }}
                     >
-                      <AppIcon name={cameraOff ? "videoOff" : "video"} size={25} color={colors.onPrimary} />
+                      <AppIcon
+                        name={cameraOff ? "videoOff" : "video"}
+                        size={25}
+                        color={colors.onPrimary}
+                      />
                       <Text style={styles.buttonText}>
                         {cameraOff ? "Camera on" : "Camera off"}
                       </Text>
@@ -528,7 +532,11 @@ export function CallingProvider({
                     style={[styles.button, styles.end]}
                     onPress={() => void finish()}
                   >
-                    <AppIcon name={phase === "finished" ? "close" : "callFilled"} size={25} color="#FFFFFF" />
+                    <AppIcon
+                      name={phase === "finished" ? "close" : "callFilled"}
+                      size={25}
+                      color="#FFFFFF"
+                    />
                     <Text style={styles.buttonText}>
                       {phase === "finished" ? "Close" : "End call"}
                     </Text>

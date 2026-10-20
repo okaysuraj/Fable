@@ -56,6 +56,9 @@ export function authError(error: unknown): string {
   );
 }
 const TOKEN_KEY = "fable_token";
+// This development-only marker is public state, not a stored Firebase token.
+const DEVELOPMENT_SESSION_KEY = "fable_development_session";
+let developmentSession: Promise<boolean> | undefined;
 let legacyCleanup: Promise<void> | undefined;
 let selectedWorkspace: string | null = null;
 let workspaceLoaded = false;
@@ -73,7 +76,12 @@ export function onSessionExpired(listener: () => void): () => void {
 export async function getSessionToken(): Promise<string | null> {
   // Obsolete locally signed sessions must not become Firebase sessions.
   await (legacyCleanup ??= AsyncStorage.removeItem(TOKEN_KEY));
-  if (devAuthEnabled) return "fable-development";
+  if (devAuthEnabled) {
+    developmentSession ??= AsyncStorage.getItem(DEVELOPMENT_SESSION_KEY).then(
+      (value) => value === "active",
+    );
+    return (await developmentSession) ? "fable-development" : null;
+  }
   if (!firebaseConfigured) return null;
   const auth = getFirebaseAuth();
   await auth.authStateReady();
@@ -204,7 +212,20 @@ export const session = {
     if (!devAuthEnabled)
       throw new Error("Development authentication is disabled.");
     await selectWorkspace(null);
-    return request<AuthResponse>("/auth/session", { method: "POST" });
+    const result = await requestJson<AuthResponse>(
+      `${getApiBaseUrl()}/auth/session`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer fable-development",
+        },
+        body: "{}",
+      },
+    );
+    await AsyncStorage.setItem(DEVELOPMENT_SESSION_KEY, "active");
+    developmentSession = Promise.resolve(true);
+    return result;
   },
   async register(
     email: string,
@@ -292,6 +313,10 @@ export const session = {
   async logout(): Promise<void> {
     // Normal sign-out affects this device. Server revocation is an explicit all-device action.
     try {
+      if (devAuthEnabled) {
+        developmentSession = Promise.resolve(false);
+        await AsyncStorage.removeItem(DEVELOPMENT_SESSION_KEY);
+      }
       if (!devAuthEnabled && firebaseConfigured)
         await signOut(getFirebaseAuth());
     } finally {

@@ -37,7 +37,6 @@ import { NewGroupModal } from "./NewGroupModal";
 import { choosePhoto, type PhotoDraft } from "@/services/photos";
 import { ContextDrawerModal } from "./ContextDrawerModal";
 import { SettingsModalView } from "./SettingsModalView";
-import { CommandPaletteModal } from "./CommandPaletteModal";
 import { BrutalButton } from "./brutal/BrutalButton";
 import { WorkspaceManagerModal } from "./WorkspaceManagerModal";
 import { ProfileModal } from "./ProfileModal";
@@ -54,7 +53,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onProfileUpdated,
 }) => {
   const inheritedColors = useBrutalTheme();
-  const [theme, setTheme] = useState<ThemeMode>(inheritedColors.bgPaper === "#FFFFFF" ? "light" : "dark");
+  const [theme, setTheme] = useState<ThemeMode>(
+    inheritedColors.bgPaper === "#FFFFFF" ? "light" : "dark",
+  );
   return (
     <BrutalThemeProvider mode={theme}>
       <DashboardContent
@@ -113,7 +114,6 @@ const DashboardContent: React.FC<
   }, [wideLayout, isDrawerOpen, isNavigationOpen, activeTab]);
   const [isContextDrawerOpen, setIsContextDrawerOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMessageSearchOpen, setIsMessageSearchOpen] = useState(false);
@@ -156,6 +156,15 @@ const DashboardContent: React.FC<
     conversationVisible:
       !callPresented &&
       !isNavigationOpen &&
+      !isCreateChatOpen &&
+      !isNewGroupOpen &&
+      !cameraDraft &&
+      !cameraBusy &&
+      !isContextDrawerOpen &&
+      !isSettingsOpen &&
+      !isWorkspaceOpen &&
+      !isProfileOpen &&
+      !isMessageSearchOpen &&
       activeTab === "chats" &&
       (wideLayout || !isDrawerOpen),
     setNotice,
@@ -268,7 +277,10 @@ const DashboardContent: React.FC<
     }
     setActiveChannel(await api.fetchChannel(getSelectedChannelId()));
   };
-  const saveProfile = async (values: { name: string; phoneNumber: string | null }) => {
+  const saveProfile = async (values: {
+    name: string;
+    phoneNumber: string | null;
+  }) => {
     const saved = await api.updateProfile(values);
     onProfileUpdated(saved);
     setTeamMembers((previous) =>
@@ -285,12 +297,22 @@ const DashboardContent: React.FC<
   const openConversation = (channelId: string, workspaceId?: string) => {
     if (workspaceId && workspaceId !== api.getSelectedWorkspaceId()) {
       setLoading(true);
-      void api.selectWorkspace(workspaceId).then(() => {
-        selectChannel(channelId);
-        setActiveTab("chats");
-        closeDrawer();
-        resetChat();
-      }).catch((failure: unknown) => { setLoadError(failure instanceof Error ? failure.message : "Couldn't open this conversation."); setLoading(false); });
+      void api
+        .selectWorkspace(workspaceId)
+        .then(() => {
+          selectChannel(channelId);
+          setActiveTab("chats");
+          closeDrawer();
+          resetChat();
+        })
+        .catch((failure: unknown) => {
+          setLoadError(
+            failure instanceof Error
+              ? failure.message
+              : "Couldn't open this conversation.",
+          );
+          setLoading(false);
+        });
       return;
     }
     selectChannel(channelId);
@@ -310,10 +332,21 @@ const DashboardContent: React.FC<
   };
   const openCamera = async () => {
     if (capturing.current) return;
-    capturing.current = true; setCameraBusy(true);
-    try { const photo = await choosePhoto("camera"); if (photo) setCameraDraft(photo); }
-    catch (failure) { setNotice(failure instanceof Error ? failure.message : "Couldn't open the camera."); }
-    finally { capturing.current = false; setCameraBusy(false); }
+    capturing.current = true;
+    setCameraBusy(true);
+    try {
+      const photo = await choosePhoto("camera");
+      if (photo) setCameraDraft(photo);
+    } catch (failure) {
+      setNotice(
+        failure instanceof Error
+          ? failure.message
+          : "Couldn't open the camera.",
+      );
+    } finally {
+      capturing.current = false;
+      setCameraBusy(false);
+    }
   };
   const showChatList =
     !loading && !loadError && (wideLayout || isDrawerOpen || !activeChannel);
@@ -347,16 +380,13 @@ const DashboardContent: React.FC<
           !cameraBusy &&
           !isContextDrawerOpen &&
           !isSettingsOpen &&
-          !isCommandPaletteOpen &&
           !isWorkspaceOpen &&
           !isProfileOpen &&
           !isMessageSearchOpen &&
           !actionMessage
         }
         currentUser={currentUser}
-        canCreateChat={
-          !loading && !loadError
-        }
+        canCreateChat={!loading && !loadError}
         canOpenSettings={Boolean(settings)}
         onCreateGroup={() => setIsNewGroupOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
@@ -365,7 +395,9 @@ const DashboardContent: React.FC<
         <SafeAreaView style={styles.safeArea} edges={["top"]}>
           <StatusBar
             barStyle={
-              settings?.theme === "dark" ? "light-content" : "dark-content"
+              BrutalColors.bgPaper === "#FFFFFF"
+                ? "dark-content"
+                : "light-content"
             }
             backgroundColor={BrutalColors.bgPaper}
           />
@@ -412,7 +444,7 @@ const DashboardContent: React.FC<
                     onCreateChat={() => setIsCreateChatOpen(true)}
                     onOpenCamera={() => void openCamera()}
                     cameraBusy={cameraBusy}
-                    canCreateChat={Boolean(api.getSelectedWorkspaceId())}
+                    canCreateChat={!loading && !loadError}
                   />
                 )}
                 <BottomTabs activeTab={activeTab} onSelect={selectTab} />
@@ -430,7 +462,7 @@ const DashboardContent: React.FC<
               {loading ? (
                 <View style={styles.state}>
                   <ActivityIndicator color={BrutalColors.ink} />
-                  <Text style={styles.title}>Loading your group…</Text>
+                  <Text style={styles.title}>Loading your chats…</Text>
                 </View>
               ) : loadError ? (
                 <View style={styles.state}>
@@ -553,11 +585,20 @@ const DashboardContent: React.FC<
             <ContactPickerModal
               currentUser={currentUser}
               photo={cameraDraft ?? undefined}
-              onClose={() => { setIsCreateChatOpen(false); setCameraDraft(null); }}
+              onClose={() => {
+                setIsCreateChatOpen(false);
+                setCameraDraft(null);
+              }}
               onCreated={conversationCreated}
             />
           )}
-          {isNewGroupOpen && <NewGroupModal currentUser={currentUser} onClose={() => setIsNewGroupOpen(false)} onCreated={conversationCreated} />}
+          {isNewGroupOpen && (
+            <NewGroupModal
+              currentUser={currentUser}
+              onClose={() => setIsNewGroupOpen(false)}
+              onCreated={conversationCreated}
+            />
+          )}
           {isContextDrawerOpen && activeChannel && (
             <ContextDrawerModal
               key={activeChannel.id}
@@ -575,7 +616,10 @@ const DashboardContent: React.FC<
               onClose={() => setIsSettingsOpen(false)}
               settings={settings}
               onLogout={onLogout}
-              onManageGroups={() => { setIsSettingsOpen(false); setIsWorkspaceOpen(true); }}
+              onManageGroups={() => {
+                setIsSettingsOpen(false);
+                setIsWorkspaceOpen(true);
+              }}
               onUpdateSettings={async (values) => {
                 const saved = await api.updateSettings(values);
                 setSettings(saved);
@@ -603,7 +647,10 @@ const DashboardContent: React.FC<
               user={currentUser}
               onClose={() => setIsProfileOpen(false)}
               onSave={saveProfile}
-              onPhotoUpdated={(saved) => { onProfileUpdated(saved); updateChatProfile(saved); }}
+              onPhotoUpdated={(saved) => {
+                onProfileUpdated(saved);
+                updateChatProfile(saved);
+              }}
             />
           )}
           {isMessageSearchOpen && activeChannel && (
@@ -616,17 +663,6 @@ const DashboardContent: React.FC<
                 setActiveTab("chats");
                 closeDrawer();
               }}
-            />
-          )}
-          {isCommandPaletteOpen && (
-            <CommandPaletteModal
-              visible
-              onClose={() => setIsCommandPaletteOpen(false)}
-              onSelectChannel={openConversation}
-              onOpenMessageSearch={
-                activeChannel ? () => setIsMessageSearchOpen(true) : undefined
-              }
-              onOpenSettings={() => setIsSettingsOpen(true)}
             />
           )}
         </SafeAreaView>

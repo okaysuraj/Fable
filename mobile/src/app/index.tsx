@@ -15,7 +15,11 @@ import { BrutalCard } from "@/components/brutal/BrutalCard";
 import { LoginView } from "@/components/LoginView";
 import { DashboardView } from "@/components/DashboardView";
 import { FableBrand } from "@/components/FableBrand";
-import { useBrutalStyles, useBrutalTheme, type BrutalPalette } from "@/hooks/use-brutal-theme";
+import {
+  useBrutalStyles,
+  useBrutalTheme,
+  type BrutalPalette,
+} from "@/hooks/use-brutal-theme";
 import { ScreenTransition } from "@/components/ui/ScreenTransition";
 import { AppIcon } from "@/components/ui/AppIcon";
 
@@ -145,31 +149,32 @@ export default function App() {
   );
 }
 
-const createStyles = (BrutalColors: BrutalPalette) => StyleSheet.create({
-  loadingArea: {
-    flex: 1,
-    backgroundColor: BrutalColors.bgPaper,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  loadingCard: {
-    padding: 32,
-    alignItems: "center",
-    gap: 8,
-  },
-  loadingTitle: {
-    fontFamily: Fonts.semibold,
-    fontWeight: "400",
-    fontSize: 18,
-    letterSpacing: 0.1,
-    color: BrutalColors.ink,
-  },
-  loadingSubtitle: {
-    fontFamily: Fonts.semibold,
-    fontSize: 12,
-    fontWeight: "400",
-    color: BrutalColors.inkMuted,
-    letterSpacing: 0.1,
-    textTransform: "none",
-  },
-});
+const createStyles = (BrutalColors: BrutalPalette) =>
+  StyleSheet.create({
+    loadingArea: {
+      flex: 1,
+      backgroundColor: BrutalColors.bgPaper,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    loadingCard: {
+      padding: 32,
+      alignItems: "center",
+      gap: 8,
+    },
+    loadingTitle: {
+      fontFamily: Fonts.semibold,
+      fontWeight: "400",
+      fontSize: 18,
+      letterSpacing: 0.1,
+      color: BrutalColors.ink,
+    },
+    loadingSubtitle: {
+      fontFamily: Fonts.semibold,
+      fontSize: 12,
+      fontWeight: "400",
+      color: BrutalColors.inkMuted,
+      letterSpacing: 0.1,
+      textTransform: "none",
+    },
+  });

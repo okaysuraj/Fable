@@ -30,7 +30,11 @@ import Animated, {
 import { scheduleOnRN } from "react-native-worklets";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Fonts } from "@/constants/theme";
-import { useBrutalStyles, useBrutalTheme, type BrutalPalette } from "@/hooks/use-brutal-theme";
+import {
+  useBrutalStyles,
+  useBrutalTheme,
+  type BrutalPalette,
+} from "@/hooks/use-brutal-theme";
 import type { User } from "@/types/chat";
 import { UserAvatar } from "./ui/UserAvatar";
 import { AppIcon, type AppIconName } from "./ui/AppIcon";
@@ -313,17 +317,36 @@ export function NavigationDrawer({ ref: drawerRef, ...props }: Props) {
                   <AppIcon name="close" size={25} />
                 </Pressable>
               </View>
-              <ScrollView contentContainerStyle={styles.content} bounces={false}>
+              <ScrollView
+                contentContainerStyle={styles.content}
+                bounces={false}
+              >
                 <View style={styles.section}>
-                  {row("New Group", "groups", props.onCreateGroup, false, !props.canCreateChat)}
+                  {row(
+                    "New Group",
+                    "groups",
+                    props.onCreateGroup,
+                    false,
+                    !props.canCreateChat,
+                  )}
                   {row("Your Profile", "profile", props.onOpenProfile)}
-                  {row("Settings", "settings", props.onOpenSettings, false, !props.canOpenSettings)}
+                  {row(
+                    "Settings",
+                    "settings",
+                    props.onOpenSettings,
+                    false,
+                    !props.canOpenSettings,
+                  )}
                 </View>
                 <View style={styles.account}>
                   <UserAvatar user={props.currentUser} self size={44} />
                   <View style={styles.profileBody}>
-                    <Text style={styles.name} numberOfLines={1}>{props.currentUser.name}</Text>
-                    <Text style={styles.caption} numberOfLines={1}>{props.currentUser.handle}</Text>
+                    <Text style={styles.name} numberOfLines={1}>
+                      {props.currentUser.name}
+                    </Text>
+                    <Text style={styles.caption} numberOfLines={1}>
+                      {props.currentUser.handle}
+                    </Text>
                   </View>
                 </View>
               </ScrollView>
@@ -375,7 +398,13 @@ const createStyles = (colors: BrutalPalette) =>
       justifyContent: "center",
     },
     content: { paddingHorizontal: 12, paddingBottom: 24 },
-    account: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14, marginTop: 30 },
+    account: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      padding: 14,
+      marginTop: 30,
+    },
     profile: {
       flexDirection: "row",
       alignItems: "center",
@@ -421,8 +450,20 @@ const createStyles = (colors: BrutalPalette) =>
       fontSize: 16,
       color: colors.ink,
     },
-    rowIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: colors.bgCard, alignItems: "center", justifyContent: "center" },
-    logoutIcon: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
+    rowIcon: {
+      width: 34,
+      height: 34,
+      borderRadius: 10,
+      backgroundColor: colors.bgCard,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    logoutIcon: {
+      width: 34,
+      height: 34,
+      alignItems: "center",
+      justifyContent: "center",
+    },
     selectedRow: { backgroundColor: colors.selection },
     selectedText: { color: colors.selectionInk },
     pressedRow: { backgroundColor: colors.bgCardAlt },

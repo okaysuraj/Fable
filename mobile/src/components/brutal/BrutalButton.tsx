@@ -5,13 +5,7 @@ import {
   type BrutalPalette,
 } from "@/hooks/use-brutal-theme";
 import React from "react";
-import {
-  Text,
-  ViewStyle,
-  TextStyle,
-  StyleSheet,
-  Platform,
-} from "react-native";
+import { Text, ViewStyle, TextStyle, StyleSheet, Platform } from "react-native";
 import { Fonts } from "@/constants/theme";
 import { MotionPressable } from "../ui/MotionPressable";
 
@@ -88,6 +82,7 @@ export const BrutalButton: React.FC<BrutalButtonProps> = ({
     >
       {icon}
       <Text
+        numberOfLines={2}
         style={[
           styles.text,
           { color: foregrounds[variant], fontSize },
@@ -111,9 +106,10 @@ const createStyles = (_colors: BrutalPalette) =>
       borderRadius: 14,
     },
     text: {
+      flexShrink: 1,
+      textAlign: "center",
       fontFamily: Fonts.semibold,
       fontWeight: "400",
-      textAlign: "center",
       lineHeight: 21,
     },
   });

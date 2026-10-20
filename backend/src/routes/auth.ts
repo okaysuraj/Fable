@@ -140,11 +140,22 @@ authRouter.patch(
         .object({
           name: z.string().trim().min(1).max(80).optional(),
           statusText: z.string().trim().max(160).nullable().optional(),
-          phoneNumber: z.string().trim().regex(/^\+[1-9]\d{6,14}$/, "Include the country code, for example +919876543210").nullable().optional(),
+          phoneNumber: z
+            .string()
+            .trim()
+            .regex(
+              /^\+[1-9]\d{6,14}$/,
+              "Include the country code, for example +919876543210",
+            )
+            .nullable()
+            .optional(),
         })
         .strict()
         .refine(
-          (value) => value.name !== undefined || value.statusText !== undefined || value.phoneNumber !== undefined,
+          (value) =>
+            value.name !== undefined ||
+            value.statusText !== undefined ||
+            value.phoneNumber !== undefined,
           "Provide a profile field",
         ),
       req.body,
@@ -165,26 +176,57 @@ authRouter.patch(
         ...(input.statusText !== undefined
           ? { statusText: input.statusText || null }
           : {}),
-        ...(input.phoneNumber !== undefined ? { phoneNumber: input.phoneNumber } : {}),
+        ...(input.phoneNumber !== undefined
+          ? { phoneNumber: input.phoneNumber }
+          : {}),
       },
       select: { ...publicUserSelect, phoneNumber: true },
     });
     res.json({ user: { ...formatUser(user), email: req.auth!.email } });
   }),
 );
-authRouter.get("/profile/photo", requireAuth, authenticatedLimiter, asyncRoute(async (req: AuthRequest, res) => {
-  await sendProfilePhoto(req.auth!.userId, res);
-}));
-authRouter.put("/profile/photo", requireAuth, authenticatedLimiter, express.raw({ type: "application/octet-stream", limit: "2mb" }), asyncRoute(async (req: AuthRequest, res) => {
-  if (!Buffer.isBuffer(req.body) || !req.body.length) throw new HttpError(400, "Choose a photo up to 2 MB");
-  const bytes: Buffer = req.body;
-  const user = await prisma.user.update({ where: { id: req.auth!.userId }, data: { photoBytes: new Uint8Array(bytes), photoMimeType: photoType(bytes), photoVersion: { increment: 1 } }, select: { ...publicUserSelect, phoneNumber: true } });
-  res.json({ user: { ...formatUser(user), email: req.auth!.email } });
-}));
-authRouter.delete("/profile/photo", requireAuth, authenticatedLimiter, asyncRoute(async (req: AuthRequest, res) => {
-  const user = await prisma.user.update({ where: { id: req.auth!.userId }, data: { photoBytes: null, photoMimeType: null, photoVersion: 0 }, select: { ...publicUserSelect, phoneNumber: true } });
-  res.json({ user: { ...formatUser(user), email: req.auth!.email } });
-}));
+authRouter.get(
+  "/profile/photo",
+  requireAuth,
+  authenticatedLimiter,
+  asyncRoute(async (req: AuthRequest, res) => {
+    await sendProfilePhoto(req.auth!.userId, res);
+  }),
+);
+authRouter.put(
+  "/profile/photo",
+  requireAuth,
+  authenticatedLimiter,
+  express.raw({ type: "application/octet-stream", limit: "2mb" }),
+  asyncRoute(async (req: AuthRequest, res) => {
+    if (!Buffer.isBuffer(req.body) || !req.body.length)
+      throw new HttpError(400, "Choose a photo up to 2 MB");
+    const bytes: Buffer = req.body;
+    const user = await prisma.user.update({
+      where: { id: req.auth!.userId },
+      data: {
+        photoBytes: new Uint8Array(bytes),
+        photoMimeType: photoType(bytes),
+        photoVersion: { increment: 1 },
+      },
+      select: { ...publicUserSelect, phoneNumber: true },
+    });
+    res.json({ user: { ...formatUser(user), email: req.auth!.email } });
+  }),
+);
+authRouter.delete(
+  "/profile/photo",
+  requireAuth,
+  authenticatedLimiter,
+  asyncRoute(async (req: AuthRequest, res) => {
+    const user = await prisma.user.update({
+      where: { id: req.auth!.userId },
+      data: { photoBytes: null, photoMimeType: null, photoVersion: 0 },
+      select: { ...publicUserSelect, phoneNumber: true },
+    });
+    res.json({ user: { ...formatUser(user), email: req.auth!.email } });
+  }),
+);
 
 authRouter.post(
   "/logout",
@@ -200,6 +242,7 @@ authRouter.post(
     await prisma.user.update({
       where: { id: req.auth!.userId },
       data: { lastSeenAt: null },
+      select: { id: true },
     });
     res.status(204).end();
   }),
