@@ -153,6 +153,8 @@ const createSchema = z
   .object({
     channelId: z.string().min(1).max(128),
     content: z.string().trim().max(10000).default(""),
+    replyToId: z.string().min(1).max(128).optional(),
+    attachmentIds: z.array(z.string().min(1).max(128)).max(4).default([]),
     codeSnippet: codeSchema.optional(),
     clientMutationId: z
       .string()
@@ -173,13 +175,17 @@ messagesRouter.post(
         501,
         "Media storage and recording are not configured",
       );
-    if (!input.content && !input.codeSnippet)
+    if (!input.content && !input.codeSnippet && !input.attachmentIds.length)
       throw new HttpError(400, "Message content is required");
     const fingerprint = createHash("sha256")
       .update(
         JSON.stringify({
           content: input.content,
           codeSnippet: input.codeSnippet || null,
+          ...(input.replyToId ? { replyToId: input.replyToId } : {}),
+          ...(input.attachmentIds.length
+            ? { attachmentIds: [...input.attachmentIds].sort() }
+            : {}),
         }),
       )
       .digest("hex");
@@ -217,11 +223,42 @@ messagesRouter.post(
           };
         }
       }
+      if (
+        input.replyToId &&
+        !(await tx.message.findFirst({
+          where: {
+            id: input.replyToId,
+            channelId: channel.id,
+            deletedAt: null,
+          },
+          select: { id: true },
+        }))
+      )
+        throw new HttpError(
+          400,
+          "Reply must reference an available message in this conversation",
+        );
+      if (new Set(input.attachmentIds).size !== input.attachmentIds.length)
+        throw new HttpError(400, "Duplicate attachments");
+      const assets = await tx.mediaAsset.count({
+        where: {
+          id: { in: input.attachmentIds },
+          channelId: channel.id,
+          ownerId: req.auth!.userId,
+          messageId: null,
+        },
+      });
+      if (assets !== input.attachmentIds.length)
+        throw new HttpError(
+          400,
+          "Attachments must be your unsent uploads in this conversation",
+        );
       const message = await tx.message.create({
         data: {
           channelId: input.channelId,
           senderId: req.auth!.userId,
           content: input.content,
+          replyToId: input.replyToId,
           ...(input.codeSnippet ? { codeSnippet: input.codeSnippet } : {}),
           ...(input.clientMutationId
             ? {
@@ -232,10 +269,34 @@ messagesRouter.post(
         },
         include: messageInclude,
       });
+      await tx.mediaAsset.updateMany({
+        where: { id: { in: input.attachmentIds } },
+        data: { messageId: message.id },
+      });
+      await tx.channel.update({
+        where: { id: channel.id },
+        data: {
+          lastMessageAt: new Date(
+            Math.max(
+              channel.lastMessageAt.getTime(),
+              message.createdAt.getTime(),
+            ),
+          ),
+        },
+      });
       await tx.messageChange.create({
         data: { channelId: message.channelId, messageId: message.id },
       });
-      return { data: formatMessage(message, req), created: true };
+      return {
+        data: formatMessage(
+          await tx.message.findUniqueOrThrow({
+            where: { id: message.id },
+            include: messageInclude,
+          }),
+          req,
+        ),
+        created: true,
+      };
     });
     res.status(result.created ? 201 : 200).json({ data: result.data });
   }),

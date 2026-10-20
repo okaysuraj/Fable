@@ -10,12 +10,18 @@ export interface User {
   workspaceRole?: "owner" | "admin" | "member";
   status: UserStatus;
   statusText?: string;
-  avatarColor?: string;
+  avatarColor?: string | null;
+  email?: string;
+  phoneNumber?: string | null;
+  photoVersion?: number;
 }
 
 export type ChannelType = "text" | "audio" | "video";
 
 export interface Channel {
+  workspaceId: string;
+  isDirect?: boolean;
+  lastMessage?: { text: string; timestamp: string } | null;
   id: string;
   name: string;
   topic: string;
@@ -36,6 +42,8 @@ export interface Reaction {
 }
 
 export interface Message {
+  attachments?: MediaAsset[];
+  replyToId?: string | null;
   id: string;
   channelId: string;
   sender: User;
@@ -54,6 +62,28 @@ export interface Message {
   };
   reactions?: Reaction[];
   isPinned?: boolean;
+}
+export interface MediaAsset {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+}
+
+export interface ConversationPresence {
+  typing: { id: string; name: string }[];
+  receipt: { messageId: string; readCount: number } | null;
+}
+export interface CallSession {
+  id: string;
+  channelId: string;
+  callerId: string;
+  calleeId: string;
+  kind: "audio" | "video";
+  status: "ringing" | "active" | "ended" | "declined";
+  offer: string | null;
+  answer: string | null;
+  createdAt: string;
 }
 
 export interface ChannelMember extends User {

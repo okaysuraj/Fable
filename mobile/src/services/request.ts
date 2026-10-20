@@ -12,6 +12,7 @@ export async function requestJson<T>(
   url: string,
   init: RequestInit = {},
   timeoutMs = 15_000,
+  responseType: "json" | "blob" = "json",
 ): Promise<T> {
   const controller = new AbortController();
   const onAbort = () => controller.abort();
@@ -21,6 +22,8 @@ export async function requestJson<T>(
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
     if (response.status === 204) return undefined as T;
+    if (response.ok && responseType === "blob")
+      return (await response.blob()) as T;
     const payload: unknown = await response.json().catch(() => null);
     if (!response.ok) {
       const error =

@@ -6,6 +6,10 @@ import { logServerError } from "./lib/telemetry.js";
 
 async function start() {
   await prisma.$connect();
+  if (config.devIdentity)
+    console.warn(
+      "Development authentication enabled: local account access does not require Firebase.",
+    );
   const server = app.listen(config.port, "0.0.0.0", () =>
     console.log(`Fable API listening on port ${config.port}`),
   );

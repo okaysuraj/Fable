@@ -1,15 +1,16 @@
+/** Real messages use aligned bubbles; actions remain reachable on touch devices. */
 import { memo } from "react";
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import {
-  useBrutalTheme,
-  useBrutalStyles,
-  type BrutalPalette,
-} from "@/hooks/use-brutal-theme";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useBrutalStyles, useBrutalTheme, type BrutalPalette } from "@/hooks/use-brutal-theme";
 import { Fonts } from "@/constants/theme";
 import type { Message, User } from "@/types/chat";
-import { MonogramAvatar } from "../brutal/MonogramAvatar";
+import { MessageMedia } from "./MessageMedia";
+import { AppIcon } from "../ui/AppIcon";
+import Animated, {
+  FadeInDown,
+  useReducedMotion,
+} from "react-native-reanimated";
 
-/** A memoized message row keeps unrelated rows stable during reaction and profile updates. */
 const reactionSymbols: Record<string, string> = {
   sparkle: "✦",
   check: "✓",
@@ -24,289 +25,269 @@ const timestampFormatter = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
   minute: "2-digit",
 });
-const formatTimestamp = (timestamp: string) => {
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime())
-    ? timestamp
-    : timestampFormatter.format(date);
-};
+function formatTimestamp(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : timestampFormatter.format(date);
+}
+interface Props {
+  onReply: (message: Message) => void;
+  replyPreview?: string;
+  receipt?: string;
+  item: Message;
+  sender: User;
+  onToggleReaction: (id: string, icon: string) => void;
+  onOpenActions: (id: string) => void;
+  highlighted: boolean;
+  isSelf: boolean;
+}
 export const MessageRow = memo(function MessageRow({
+  onReply,
+  replyPreview,
+  receipt,
   item,
   sender,
   onToggleReaction,
   onOpenActions,
   highlighted,
-}: {
-  item: Message;
-  sender: User;
-  onToggleReaction: (messageId: string, icon: string) => void;
-  onOpenActions: (messageId: string) => void;
-  highlighted: boolean;
-}) {
-  const BrutalColors = useBrutalTheme();
+  isSelf,
+}: Props) {
   const styles = useBrutalStyles(createStyles);
+  const colors = useBrutalTheme();
+  const reduceMotion = useReducedMotion();
+  const canAct = !item.deletedAt;
   return (
-    <View style={styles.messageItem}>
-      <MonogramAvatar
-        monogram={sender.monogram}
-        backgroundColor={sender.avatarColor || BrutalColors.accentYellow}
-        size={36}
-        status={sender.status}
-      />
+    <Animated.View
+      entering={reduceMotion ? undefined : FadeInDown.duration(180)}
+      style={[styles.messageItem, isSelf && styles.selfItem]}
+    >
       <View
         style={[
-          styles.messageContent,
-          highlighted && {
-            borderColor: BrutalColors.accentBlue,
-            borderWidth: 3,
-          },
+          styles.bubble,
+          isSelf && styles.selfBubble,
+          highlighted && styles.highlighted,
         ]}
       >
-        {highlighted && <Text style={styles.roleText}>SEARCH RESULT</Text>}
-        <View style={styles.senderHeader}>
-          <Text style={styles.senderName}>{sender.name}</Text>
-          <View style={styles.roleBadge}>
-            <Text style={styles.roleText}>{sender.role}</Text>
+        {highlighted && (
+          <Text style={[styles.caption, isSelf && styles.selfCaption]}>
+            Search result
+          </Text>
+        )}
+        {!isSelf && <Text style={styles.senderName}>{sender.name}</Text>}
+        {item.replyToId && (
+          <View
+            style={{
+              borderLeftWidth: 3,
+              borderLeftColor: isSelf ? "#FFFFFF80" : "#0067DD",
+              paddingLeft: 10,
+            }}
+          >
+            <Text style={[styles.caption, isSelf && styles.selfCaption]}>
+              Reply
+            </Text>
+            <Text
+              numberOfLines={2}
+              style={[styles.caption, isSelf && styles.selfCaption]}
+            >
+              {replyPreview}
+            </Text>
           </View>
-          <Text style={styles.timestamp}>
+        )}
+        <Text
+          selectable={!item.deletedAt}
+          style={[
+            styles.messageText,
+            isSelf && styles.selfText,
+            /^\p{Extended_Pictographic}[\p{Extended_Pictographic}\p{Emoji_Component}\s]*$/u.test(
+              item.content,
+            ) && { fontSize: 34, lineHeight: 44 },
+          ]}
+        >
+          {item.deletedAt ? "Deleted message" : item.content}
+        </Text>
+        {!item.deletedAt && item.codeSnippet && (
+          <View style={[styles.code, isSelf && styles.selfCode]}>
+            <Text style={[styles.caption, isSelf && styles.selfCaption]}>
+              {item.codeSnippet.language}
+            </Text>
+            <Text
+              selectable
+              style={[styles.codeText, isSelf && styles.selfText]}
+            >
+              {item.codeSnippet.code}
+            </Text>
+          </View>
+        )}
+        {!item.deletedAt &&
+          item.attachments?.map((asset) => (
+            <MessageMedia key={asset.id} asset={asset} />
+          ))}
+        {!item.deletedAt && (
+          <View style={styles.reactions}>
+            {item.reactions?.map((reaction) => (
+              <Pressable
+                key={reaction.icon}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  (reaction.reactedByMe ? "Remove " : "Add ") +
+                  reaction.icon +
+                  " reaction (" +
+                  reaction.count +
+                  ")"
+                }
+                accessibilityState={{ selected: reaction.reactedByMe }}
+                onPress={() => onToggleReaction(item.id, reaction.icon)}
+                hitSlop={8}
+                style={[
+                  styles.reaction,
+                  reaction.reactedByMe && styles.selectedReaction,
+                  isSelf && styles.selfReaction,
+                ]}
+              >
+                <Text style={[styles.reactionText, isSelf && styles.selfText]}>
+                  {reactionSymbols[reaction.icon] || reaction.icon}{" "}
+                  {reaction.count}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+        <View style={styles.metadata}>
+          {receipt && (
+            <Text style={[styles.caption, isSelf && styles.selfCaption]}>
+              {receipt}
+            </Text>
+          )}
+          {item.isPinned && (
+            <Text style={[styles.caption, isSelf && styles.selfCaption]}>
+              Pinned
+            </Text>
+          )}
+          {item.editedAt && !item.deletedAt && (
+            <Text style={[styles.caption, isSelf && styles.selfCaption]}>
+              Edited
+            </Text>
+          )}
+          <Text style={[styles.timestamp, isSelf && styles.selfCaption]}>
             {formatTimestamp(item.timestamp)}
           </Text>
-          {!item.deletedAt &&
-            (item.canEdit || item.canDelete || item.canPin) && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Message actions for ${sender.name}`}
-                hitSlop={8}
-                onPress={() => onOpenActions(item.id)}
-                style={{
-                  minWidth: 32,
-                  minHeight: 32,
-                  justifyContent: "center",
-                  alignItems: "center",
-                }}
-              >
-                <Text style={styles.senderName}>•••</Text>
-              </Pressable>
-            )}
+          {canAct && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Reply to ${sender.name}`}
+              onPress={() => onReply(item)}
+              style={styles.action}
+            >
+              <AppIcon name="reply" size={17} color={isSelf ? "#FFFFFF" : colors.inkMuted} />
+            </Pressable>
+          )}
+          {canAct && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={"Message actions for " + sender.name}
+              onPress={() => onOpenActions(item.id)}
+              hitSlop={10}
+              style={styles.action}
+            >
+              <AppIcon name="more" size={19} color={isSelf ? "#FFFFFF" : colors.inkMuted} />
+            </Pressable>
+          )}
         </View>
-        {item.deletedAt ? (
-          <Text style={styles.messageText}>Deleted message</Text>
-        ) : (
-          <>
-            {item.isPinned && <Text style={styles.roleText}>PINNED</Text>}
-            {item.editedAt && <Text style={styles.roleText}>Edited</Text>}
-            {item.content ? (
-              <Text selectable style={styles.messageText}>
-                {item.content}
-              </Text>
-            ) : null}
-            {item.codeSnippet && (
-              <View style={styles.codeSnippetCard}>
-                <View style={styles.codeSnippetHeader}>
-                  <Text style={styles.codeSnippetLang}>
-                    {item.codeSnippet.language.toUpperCase()}
-                  </Text>
-                </View>
-                <Text selectable style={styles.codeSnippetContent}>
-                  {item.codeSnippet.code}
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.reactionsRow}>
-              {item.reactions?.map((reaction) => (
-                <Pressable
-                  key={reaction.icon}
-                  accessibilityRole="button"
-                  accessibilityLabel={`React ${reaction.icon}, ${reaction.count} reactions`}
-                  accessibilityState={{ selected: reaction.reactedByMe }}
-                  hitSlop={8}
-                  onPress={() => onToggleReaction(item.id, reaction.icon)}
-                  style={[
-                    styles.reactionPill,
-                    reaction.reactedByMe && styles.reactionPillActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.reactionIcon,
-                      reaction.reactedByMe && { color: "#1A1A1A" },
-                    ]}
-                  >
-                    {reactionSymbols[reaction.icon] || reaction.icon}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.reactionCount,
-                      reaction.reactedByMe && { color: "#1A1A1A" },
-                    ]}
-                  >
-                    {reaction.count}
-                  </Text>
-                </Pressable>
-              ))}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Add sparkle reaction"
-                hitSlop={8}
-                onPress={() => onToggleReaction(item.id, "sparkle")}
-                style={styles.addReactionBtn}
-              >
-                <Text style={styles.addReactionText}>+ ✦</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Add heart reaction"
-                hitSlop={8}
-                onPress={() => onToggleReaction(item.id, "heart")}
-                style={styles.addReactionBtn}
-              >
-                <Text style={styles.addReactionText}>+ ♥</Text>
-              </Pressable>
-            </View>
-          </>
-        )}
       </View>
-    </View>
+    </Animated.View>
   );
 });
-
-const createStyles = (BrutalColors: BrutalPalette) =>
+const createStyles = (colors: BrutalPalette) =>
   StyleSheet.create({
     messageItem: {
       flexDirection: "row",
       alignItems: "flex-start",
-      gap: 12,
+      gap: 10,
+      width: "100%",
+      paddingVertical: 4,
     },
-    messageContent: {
-      flex: 1,
-      backgroundColor: BrutalColors.bgCard,
-      borderWidth: 2.5,
-      borderColor: BrutalColors.border,
-      borderRadius: 4,
-      padding: 12,
-      gap: 8,
-      ...Platform.select({
-        web: {
-          boxShadow: `2px 2px 0px ${BrutalColors.border}`,
-        },
-        default: {
-          shadowColor: BrutalColors.border,
-          shadowOffset: { width: 2, height: 2 },
-          shadowOpacity: 1,
-          shadowRadius: 0,
-          elevation: 2,
-        },
-      }),
+    selfItem: { justifyContent: "flex-end" },
+    bubble: {
+      maxWidth: "84%",
+      flexShrink: 1,
+      backgroundColor: colors.bubbleReceived,
+      borderRadius: 20,
+      borderBottomLeftRadius: 6,
+      paddingHorizontal: 15,
+      paddingTop: 10,
+      paddingBottom: 7,
+      gap: 6,
     },
-    senderHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8,
-      flexWrap: "wrap",
+    selfBubble: {
+      backgroundColor: colors.bubbleSent,
+      borderBottomLeftRadius: 20,
+      borderBottomRightRadius: 6,
     },
+    highlighted: { borderWidth: 1, borderColor: colors.primary },
     senderName: {
-      fontFamily: Fonts?.sans,
-      fontWeight: "900",
-      fontSize: 13,
-      color: BrutalColors.ink,
-    },
-    roleBadge: {
-      borderWidth: 1.5,
-      borderColor: BrutalColors.border,
-      borderRadius: 3,
-      backgroundColor: BrutalColors.bgCardAlt,
-      paddingHorizontal: 5,
-      paddingVertical: 1,
-    },
-    roleText: {
-      fontFamily: Fonts?.mono,
-      fontSize: 9,
-      fontWeight: "800",
-      color: BrutalColors.inkSecondary,
-    },
-    timestamp: {
-      fontFamily: Fonts?.mono,
-      fontSize: 10,
-      color: BrutalColors.inkMuted,
-      marginLeft: "auto",
+      fontFamily: Fonts.sans,
+      fontSize: 15,
+      lineHeight: 19,
+      color: colors.inkSecondary,
     },
     messageText: {
-      fontFamily: Fonts?.sans,
-      fontSize: 14,
-      lineHeight: 20,
-      fontWeight: "500",
-      color: BrutalColors.ink,
+      fontFamily: Fonts.sans,
+      fontSize: 18,
+      lineHeight: 25,
+      color: colors.ink,
     },
-    codeSnippetCard: {
-      backgroundColor: "#1A1A1A",
-      borderWidth: 2,
-      borderColor: BrutalColors.border,
-      borderRadius: 4,
+    selfText: { color: "#FFFFFF" },
+    caption: {
+      fontFamily: Fonts.sans,
+      fontSize: 11,
+      color: colors.inkSecondary,
+    },
+    selfCaption: { color: "#FFFFFF" },
+    metadata: {
+      flexDirection: "row",
+      justifyContent: "flex-end",
+      alignItems: "center",
+      gap: 7,
+      minHeight: 22,
+    },
+    timestamp: {
+      fontFamily: Fonts.sans,
+      fontSize: 11,
+      color: colors.inkSecondary,
+    },
+    action: {
+      minWidth: 44,
+      minHeight: 44,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    more: { fontSize: 18, color: colors.inkMuted },
+    code: {
+      backgroundColor: colors.codeBg,
+      borderRadius: 9,
       padding: 10,
       gap: 6,
+      marginVertical: 4,
     },
-    codeSnippetHeader: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-    },
-    codeSnippetLang: {
-      fontFamily: Fonts?.mono,
-      fontSize: 9,
-      fontWeight: "800",
-      color: BrutalColors.accentYellow,
-    },
-    codeSnippetContent: {
-      fontFamily: Fonts?.mono,
+    selfCode: { backgroundColor: "#FFFFFF1C" },
+    codeText: {
+      fontFamily: Fonts.mono,
       fontSize: 12,
-      color: "#FFFFFF",
-      lineHeight: 18,
+      lineHeight: 20,
+      color: colors.ink,
     },
-    reactionsRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-      flexWrap: "wrap",
-      marginTop: 2,
+    reactions: { flexDirection: "row", gap: 6, flexWrap: "wrap" },
+    reaction: {
+      paddingVertical: 5,
+      paddingHorizontal: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 9,
+      backgroundColor: colors.bgCardAlt,
     },
-    reactionPill: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4,
-      borderWidth: 1.5,
-      borderColor: BrutalColors.border,
-      borderRadius: 4,
-      backgroundColor: BrutalColors.bgCardAlt,
-      paddingHorizontal: 7,
-      paddingVertical: 3,
+    selectedReaction: {
+      borderColor: colors.primary,
+      backgroundColor: colors.selection,
     },
-    reactionPillActive: {
-      backgroundColor: BrutalColors.accentYellow,
-      borderWidth: 2,
-    },
-    reactionIcon: {
-      fontSize: 11,
-    },
-    reactionCount: {
-      fontFamily: Fonts?.mono,
-      fontSize: 10,
-      fontWeight: "800",
-      color: BrutalColors.ink,
-    },
-    addReactionBtn: {
-      minWidth: 32,
-      minHeight: 32,
-      borderWidth: 1.5,
-      borderColor: BrutalColors.inkFaint,
-      borderRadius: 4,
-      paddingHorizontal: 6,
-      paddingVertical: 3,
-      backgroundColor: "transparent",
-    },
-    addReactionText: {
-      fontFamily: Fonts?.mono,
-      fontSize: 10,
-      fontWeight: "700",
-      color: BrutalColors.inkMuted,
-    },
+    selfReaction: { backgroundColor: "#FFFFFF20", borderColor: "#FFFFFF60" },
+    reactionText: { fontFamily: Fonts.medium, fontSize: 12, color: colors.ink },
   });

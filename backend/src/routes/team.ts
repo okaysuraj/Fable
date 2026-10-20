@@ -7,8 +7,14 @@ import { AuthRequest } from "../lib/auth.js";
 import { asyncRoute, HttpError, parse } from "../lib/http.js";
 import { formatUser, publicUserSelect } from "../lib/access.js";
 import { directoryPage, directoryQuery } from "../lib/directory.js";
+import { sendProfilePhoto } from "../lib/profilePhoto.js";
 
 export const teamRouter = Router();
+teamRouter.get("/profiles/:id/photo", asyncRoute(async (req: AuthRequest, res) => {
+  const user = await prisma.user.findFirst({ where: { id: req.params.id, memberships: { some: { workspaceId: req.auth!.workspaceId, workspace: { members: { some: { userId: req.auth!.userId } } } } } }, select: { id: true } });
+  if (!user) throw new HttpError(404, "Profile not found");
+  await sendProfilePhoto(user.id, res);
+}));
 teamRouter.post(
   "/profiles",
   asyncRoute(async (req: AuthRequest, res) => {
@@ -61,6 +67,7 @@ teamRouter.get(
                   OR: [
                     { name: { contains: q, mode: "insensitive" } },
                     { handle: { contains: q, mode: "insensitive" } },
+                    ...(/\d/.test(q) ? [{ phoneNumber: { contains: q.replace(/[^\d+]/g, "") } }] : []),
                   ],
                 },
               }
@@ -96,7 +103,7 @@ teamRouter.get(
           select: {
             userId: true,
             role: true,
-            user: { select: publicUserSelect },
+            user: { select: { ...publicUserSelect, phoneNumber: true } },
           },
           take: limit + 1,
         });

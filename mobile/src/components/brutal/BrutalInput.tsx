@@ -44,18 +44,14 @@ export const BrutalInput: React.FC<BrutalInputProps> = ({
         Platform.select<TextStyle>({
           web: {
             boxShadow: isFocused
-              ? `3px 3px 0px ${BrutalColors.border}`
+              ? `0px 0px 0px 3px ${BrutalColors.selection}`
               : "none",
             outlineWidth: 0,
           },
           default: {
-            shadowColor: BrutalColors.border,
-            shadowOffset: isFocused
-              ? { width: 3, height: 3 }
-              : { width: 0, height: 0 },
-            shadowOpacity: isFocused ? 1 : 0,
-            shadowRadius: 0,
-            elevation: isFocused ? 3 : 0,
+            borderColor: isFocused
+              ? BrutalColors.primary
+              : BrutalColors.controlBorder,
           },
         }),
         style,
@@ -68,14 +64,15 @@ const createStyles = (BrutalColors: BrutalPalette) =>
   StyleSheet.create({
     input: {
       backgroundColor: BrutalColors.bgInput,
-      borderWidth: 3,
-      borderColor: BrutalColors.border,
-      borderRadius: 4,
+      minHeight: 48,
+      borderWidth: 1,
+      borderColor: BrutalColors.controlBorder,
+      borderRadius: 10,
       paddingVertical: 12,
       paddingHorizontal: 14,
-      fontFamily: Fonts?.sans,
+      fontFamily: Fonts.sans,
       fontSize: 15,
-      fontWeight: "600",
+      fontWeight: "400",
       color: BrutalColors.ink,
     },
   });

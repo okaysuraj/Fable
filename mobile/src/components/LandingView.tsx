@@ -1,379 +1,236 @@
-/** Public native introduction and entry into email/password authentication. */
+/** Native public introduction presents the app's actual collaboration features. */
 import React from "react";
 import { View, Text, ScrollView, StyleSheet, StatusBar } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { BrutalColors, Fonts } from "@/constants/theme";
+import { BrutalColors as colors, Fonts } from "@/constants/theme";
 import { BrutalButton } from "./brutal/BrutalButton";
-import { BrutalCard } from "./brutal/BrutalCard";
-import { BrutalTag } from "./brutal/BrutalTag";
+import { FableBrand } from "./FableBrand";
+import { devAuthEnabled } from "@/services/developmentAuth";
 
 interface LandingViewProps {
   onLogin: () => void;
   onSignUp: () => void;
 }
-
+const features = [
+  {
+    symbol: "#",
+    title: "Chat to focus",
+    copy: "Organize projects in public or private chats, with membership you control.",
+  },
+  {
+    symbol: "⌕",
+    title: "Nothing gets lost",
+    copy: "Search past conversations and pin the messages worth coming back to.",
+  },
+  {
+    symbol: "○",
+    title: "Your group, connected",
+    copy: "Invite people, manage roles, and keep separate projects in their own groups.",
+  },
+];
 export const LandingView: React.FC<LandingViewProps> = ({
   onLogin,
   onSignUp,
-}) => {
-  const features = [
-    {
-      title: "TEXT CHANNELS",
-      desc: "Organized rooms for every topic. Share messages and reactions with your team.",
-      accent: BrutalColors.accentYellow,
-      icon: "#",
-    },
-    {
-      title: "PRIVATE ROOMS",
-      desc: "Choose who can join the conversation, and manage membership in one place.",
-      accent: BrutalColors.accentPink,
-      icon: "◉",
-    },
-    {
-      title: "MESSAGE HISTORY",
-      desc: "Find earlier conversations with full-history search, and pin messages you need again.",
-      accent: BrutalColors.accentBlue,
-      icon: "▶",
-    },
-    {
-      title: "SHARED WORKSPACES",
-      desc: "Invite your team, manage roles, and keep separate projects in their own spaces.",
-      accent: BrutalColors.accentGreen,
-      icon: "~",
-    },
-  ];
-
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar
-        barStyle="dark-content"
-        backgroundColor={BrutalColors.bgPaper}
-      />
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ═══ NAV BAR ═══ */}
-        <View style={styles.navBar}>
-          <View style={styles.logoRow}>
-            <View style={styles.logoBadge}>
-              <Text style={styles.logoBadgeText}>F</Text>
-            </View>
-            <Text style={styles.logoText}>FABLE</Text>
+}) => (
+  <SafeAreaView style={styles.safeArea}>
+    <StatusBar barStyle="dark-content" backgroundColor={colors.bgPaper} />
+    <ScrollView
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={styles.navigation}>
+        <FableBrand />
+        <BrutalButton
+          title={devAuthEnabled ? "Open Fable" : "Log in"}
+          variant="outline"
+          size="sm"
+          onPress={onLogin}
+        />
+      </View>
+      <View style={styles.hero}>
+        <Text accessibilityRole="header" style={styles.headline}>
+          Your group.{"\n"}In good company.
+        </Text>
+        <Text style={styles.copy}>
+          Big ideas, small updates, and everything in between. Give your group a
+          place to talk, share, and move work forward.
+        </Text>
+        <BrutalButton
+          title={devAuthEnabled ? "Open your group" : "Create your group"}
+          onPress={devAuthEnabled ? onLogin : onSignUp}
+          size="lg"
+        />
+      </View>
+      <View style={styles.board}>
+        <Text style={styles.boardCaption}>A place for every idea.</Text>
+        <View style={styles.conversation}>
+          <View style={styles.symbol}>
+            <Text style={styles.symbolText}>···</Text>
           </View>
-
-          <View style={styles.navActions}>
-            <BrutalButton
-              title="LOG IN"
-              onPress={onLogin}
-              variant="outline"
-              size="sm"
-            />
-            <BrutalButton
-              title="SIGN UP"
-              onPress={onSignUp}
-              variant="yellow"
-              size="sm"
-            />
-          </View>
-        </View>
-
-        {/* ═══ HERO SECTION ═══ */}
-        <View style={styles.heroSection}>
-          <BrutalTag
-            label="NOW IN BETA"
-            color={BrutalColors.accentYellow}
-            dotColor={BrutalColors.accentGreen}
-            style={styles.heroTag}
-          />
-
-          <View style={styles.headlineContainer}>
-            <Text style={styles.headline}>TALK</Text>
-            <Text style={[styles.headline, { color: BrutalColors.accentPink }]}>
-              BOLD.
-            </Text>
-            <Text style={styles.headline}>BUILD</Text>
-            <Text style={[styles.headline, { color: BrutalColors.accentBlue }]}>
-              LOUD.
+          <View style={{ flex: 1 }}>
+            <Text style={styles.boardTitle}>Start a conversation.</Text>
+            <Text style={styles.boardCopy}>
+              Bring your people into the chat.
             </Text>
           </View>
-
-          <Text style={styles.subhead}>
-            A shared workspace for creative studios. Keep conversations
-            organized and build together.
-          </Text>
-
-          <View style={styles.ctaRow}>
-            <BrutalButton
-              title="GET STARTED →"
-              onPress={onSignUp}
-              variant="yellow"
-              size="lg"
-              style={styles.ctaPrimary}
-            />
-            <BrutalButton
-              title="I HAVE AN ACCOUNT"
-              onPress={onLogin}
-              variant="outline"
-              size="lg"
-              style={styles.ctaSecondary}
-            />
+        </View>
+        <View style={styles.boardFeatures}>
+          <View style={styles.boardFeature}>
+            <Text style={styles.boardFeatureText}>Find your people</Text>
+          </View>
+          <View style={[styles.boardFeature, { backgroundColor: "#D9F5EF" }]}>
+            <Text style={[styles.boardFeatureText, { color: "#22594E" }]}>
+              Keep the good ideas
+            </Text>
           </View>
         </View>
-
-        {/* ═══ FEATURE CARDS ═══ */}
-        <View style={styles.featuresSection}>
-          <Text style={styles.sectionHeader}>STUDIO ARSENAL</Text>
-          {features.map((item) => (
-            <BrutalCard key={item.title} style={styles.featureCard}>
-              <View style={styles.featureRow}>
-                <View
-                  style={[
-                    styles.featureIconBadge,
-                    { backgroundColor: item.accent },
-                  ]}
-                >
-                  <Text style={styles.featureIconText}>{item.icon}</Text>
-                </View>
-                <View style={styles.featureTextCol}>
-                  <Text style={styles.featureTitle}>{item.title}</Text>
-                  <Text style={styles.featureDesc}>{item.desc}</Text>
-                </View>
-              </View>
-            </BrutalCard>
-          ))}
-        </View>
-
-        {/* ═══ FOOTER STRIP ═══ */}
-        <View style={styles.footer}>
-          <View style={styles.footerBrand}>
-            <View style={styles.footerLogoBadge}>
-              <Text style={styles.footerLogoText}>F</Text>
+      </View>
+      <View style={styles.details}>
+        <Text accessibilityRole="header" style={styles.sectionTitle}>
+          Built around the conversation.
+        </Text>
+        {features.map((feature) => (
+          <View key={feature.title} style={styles.feature}>
+            <View style={styles.featureSymbol}>
+              <Text style={styles.featureGlyph}>{feature.symbol}</Text>
             </View>
-            <Text style={styles.footerBrandText}>FABLE STUDIO © 2026</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.featureTitle}>{feature.title}</Text>
+              <Text style={styles.featureCopy}>{feature.copy}</Text>
+            </View>
           </View>
-          <Text style={styles.footerMetaText}>
-            CONVERSATIONS FOR CREATIVE TEAMS
-          </Text>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
-  );
-};
-
+        ))}
+      </View>
+      <View style={styles.footer}>
+        <FableBrand />
+        <Text style={styles.footerCopy}>A shared space for your group.</Text>
+      </View>
+    </ScrollView>
+  </SafeAreaView>
+);
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: BrutalColors.bgPaper,
+  safeArea: { flex: 1, backgroundColor: colors.bgPaper },
+  content: {
+    padding: 24,
+    paddingBottom: 36,
+    maxWidth: 680,
+    width: "100%",
+    alignSelf: "center",
   },
-  scrollContent: {
-    paddingBottom: 24,
-  },
-  navBar: {
+  navigation: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 3,
-    borderBottomColor: BrutalColors.border,
-    backgroundColor: BrutalColors.bgCard,
+    gap: 16,
   },
-  logoRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  logoBadge: {
-    width: 38,
-    height: 38,
-    backgroundColor: BrutalColors.accentYellow,
-    borderWidth: 2.5,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  logoBadgeText: {
-    fontFamily: Fonts?.sans,
-    fontWeight: "900",
-    fontSize: 22,
-    color: BrutalColors.ink,
-  },
-  logoText: {
-    fontFamily: Fonts?.sans,
-    fontWeight: "900",
-    fontSize: 22,
-    letterSpacing: -0.5,
-    color: BrutalColors.ink,
-  },
-  navActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginLeft: "auto",
-  },
-  heroSection: {
-    paddingHorizontal: 20,
-    paddingTop: 28,
-    paddingBottom: 36,
-  },
-  heroTag: {
-    marginBottom: 16,
-  },
-  headlineContainer: {
-    marginBottom: 16,
-  },
+  hero: { paddingTop: 46, paddingBottom: 32, gap: 24 },
   headline: {
-    fontFamily: Fonts?.sans,
-    fontWeight: "900",
-    fontSize: 48,
-    lineHeight: 50,
-    letterSpacing: -1.5,
-    color: BrutalColors.ink,
+    fontFamily: Fonts.display,
+    fontSize: 43,
+    lineHeight: 51,
+    letterSpacing: -2,
+    color: colors.ink,
   },
-  subhead: {
-    fontFamily: Fonts?.sans,
+  copy: {
+    fontFamily: Fonts.sans,
     fontSize: 16,
-    lineHeight: 24,
-    fontWeight: "500",
-    color: BrutalColors.inkSecondary,
-    marginBottom: 24,
+    lineHeight: 28,
+    color: colors.inkSecondary,
   },
-  ctaRow: {
-    gap: 12,
-    marginBottom: 28,
+  board: {
+    backgroundColor: "#0067DD",
+    borderRadius: 24,
+    borderBottomLeftRadius: 7,
+    padding: 22,
+    gap: 22,
   },
-  ctaPrimary: {
-    width: "100%",
-  },
-  ctaSecondary: {
-    width: "100%",
-  },
-  proofRow: {
+  boardCaption: { fontFamily: Fonts.medium, fontSize: 14, color: "#E8EDFF" },
+  conversation: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 14,
+    backgroundColor: "#F4F6FF",
+    padding: 20,
+    borderRadius: 16,
+    borderBottomLeftRadius: 5,
   },
-  avatarStack: {
-    flexDirection: "row",
-  },
-  proofAvatar: {
-    width: 32,
-    height: 32,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 2,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
+  symbol: {
+    width: 42,
+    height: 48,
+    backgroundColor: "#EAD8FF",
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
   },
-  proofAvatarText: {
-    fontFamily: Fonts?.mono,
-    fontSize: 10,
-    fontWeight: "800",
-    color: BrutalColors.ink,
+  symbolText: { fontFamily: Fonts.semibold, fontSize: 26, color: "#24304B" },
+  boardTitle: {
+    fontFamily: Fonts.display,
+    fontSize: 19,
+    lineHeight: 27,
+    color: "#24304B",
   },
-  proofText: {
-    fontFamily: Fonts?.mono,
-    fontSize: 11,
-    fontWeight: "700",
-    color: BrutalColors.inkMuted,
-    letterSpacing: 0.5,
+  boardCopy: {
+    fontFamily: Fonts.sans,
+    fontSize: 12,
+    lineHeight: 20,
+    color: "#50617D",
+    marginTop: 6,
   },
-  featuresSection: {
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-    gap: 14,
-  },
-  sectionHeader: {
-    fontFamily: Fonts?.sans,
-    fontWeight: "900",
-    fontSize: 18,
-    letterSpacing: 0.5,
-    color: BrutalColors.ink,
-    marginBottom: 4,
-  },
-  featureCard: {
+  boardFeatures: { flexDirection: "row", gap: 12 },
+  boardFeature: {
+    flex: 1,
     padding: 16,
+    borderRadius: 12,
+    backgroundColor: "#0059C1",
+    justifyContent: "center",
   },
-  featureRow: {
+  boardFeatureText: {
+    fontFamily: Fonts.medium,
+    fontSize: 13,
+    lineHeight: 21,
+    color: "#FFFFFF",
+  },
+  details: { paddingTop: 42, gap: 26 },
+  sectionTitle: {
+    fontFamily: Fonts.display,
+    fontSize: 27,
+    lineHeight: 36,
+    letterSpacing: -0.8,
+    color: colors.ink,
+  },
+  feature: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 14,
+    gap: 16,
+    paddingTop: 22,
+    borderTopWidth: 1,
+    borderColor: colors.border,
   },
-  featureIconBadge: {
-    width: 44,
-    height: 44,
-    borderWidth: 2.5,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
+  featureSymbol: {
+    width: 32,
+    height: 36,
     alignItems: "center",
     justifyContent: "center",
   },
-  featureIconText: {
-    fontFamily: Fonts?.mono,
-    fontWeight: "900",
-    fontSize: 20,
-    color: BrutalColors.ink,
+  featureGlyph: {
+    fontFamily: Fonts.semibold,
+    fontSize: 24,
+    color: colors.primary,
   },
-  featureTextCol: {
-    flex: 1,
-  },
-  featureTitle: {
-    fontFamily: Fonts?.sans,
-    fontWeight: "900",
-    fontSize: 16,
-    letterSpacing: 0.2,
-    color: BrutalColors.ink,
-    marginBottom: 4,
-  },
-  featureDesc: {
-    fontFamily: Fonts?.sans,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "500",
-    color: BrutalColors.inkSecondary,
+  featureTitle: { fontFamily: Fonts.semibold, fontSize: 16, color: colors.ink },
+  featureCopy: {
+    fontFamily: Fonts.sans,
+    fontSize: 14,
+    lineHeight: 24,
+    color: colors.inkMuted,
+    marginTop: 8,
   },
   footer: {
-    backgroundColor: BrutalColors.ink,
-    borderTopWidth: 3,
-    borderTopColor: BrutalColors.border,
-    paddingHorizontal: 20,
-    paddingVertical: 24,
-    gap: 12,
+    paddingTop: 28,
+    marginTop: 36,
+    borderTopWidth: 1,
+    borderColor: colors.border,
+    gap: 5,
   },
-  footerBrand: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  footerLogoBadge: {
-    width: 26,
-    height: 26,
-    backgroundColor: BrutalColors.accentYellow,
-    borderWidth: 2,
-    borderColor: "#FFFFFF",
-    borderRadius: 3,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  footerLogoText: {
-    fontFamily: Fonts?.sans,
-    fontWeight: "900",
-    fontSize: 14,
-    color: BrutalColors.ink,
-  },
-  footerBrandText: {
-    fontFamily: Fonts?.mono,
-    fontSize: 12,
-    fontWeight: "700",
-    color: "rgba(255, 255, 255, 0.7)",
-  },
-  footerMetaText: {
-    fontFamily: Fonts?.mono,
-    fontSize: 10,
-    color: "rgba(255, 255, 255, 0.5)",
-    letterSpacing: 0.8,
-  },
+  footerCopy: { fontFamily: Fonts.sans, fontSize: 12, color: colors.inkMuted },
 });

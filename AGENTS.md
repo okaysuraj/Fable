@@ -12,6 +12,8 @@ This file is reusable: place it at the repository root as `AGENTS.md`. Agents th
 
 ### Fable hobby-project overrides (current user requirements)
 
+The user requested Firebase-free local testing on 20 October 2026. Preserve the explicitly enabled development identity (`DEV_AUTH_ENABLED` on the API, matching public flags on web/mobile). It uses real PostgreSQL records and existing membership authorization. The API must refuse this mode outside `NODE_ENV=development`; web production builds and Expo release bundles must use Firebase. Firebase verification requirements below apply to Firebase mode, including production. Do not add a second password system or remove the production identity implementation.
+
 Fable is a hobby project. The user explicitly requested no GitHub workflow CI and no test files. Do not create or restore `.github/workflows`, automated test suites, fixture generators, test harnesses or test-only dependencies unless the user changes this preference. Use production builds, strict type checks, lint, schema validation and documented manual walkthroughs instead. Generic testing/CI advice elsewhere in this reusable guide is optional reference and does not override this instruction. Preserve honest statements about the limits of that verification. A Docker healthcheck is an operational check, not a test suite.
 
 The user explicitly chose to keep Fable's working Express/Prisma backend. FastAPI below belongs to the reusable architecture template and is not a planned Fable migration or authorization to replace its API. Read `ARCHITECTURE.md` and `GEMINI_HANDOFF.md` for the actual Express/Prisma architecture and remaining work.

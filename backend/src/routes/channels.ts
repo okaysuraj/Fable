@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
@@ -16,19 +17,23 @@ import { messagePage } from "../lib/messageHistory.js";
 import { directoryPage, directoryQuery } from "../lib/directory.js";
 
 import { channelMembersRouter } from "./channelMembers.js";
+import { conversationPresenceRouter } from "./conversationPresence.js";
 
 /** Room directory, metadata, read watermarks and pinned-message history. */
 export const channelsRouter = Router();
 channelsRouter.use(channelMembersRouter);
+channelsRouter.use(conversationPresenceRouter);
 type ChannelRecord = {
   id: string;
+  workspaceId: string;
   name: string;
   topic: string;
   type: string;
   isPrivate: boolean;
   createdById: string | null;
+  directKey: string | null;
 };
-async function formatChannels(
+export async function formatChannels(
   channels: ChannelRecord[],
   req: AuthRequest,
   db: Prisma.TransactionClient = prisma,
@@ -47,31 +52,73 @@ async function formatChannels(
     FROM "Channel" c WHERE c."id" IN (${Prisma.join(channels.map((channel) => channel.id))})
   `);
   const byId = new Map(metrics.map((metric) => [metric.id, metric]));
-  return channels.map((channel) => ({
+  const peers = await db.channelMember.findMany({
+    where: {
+      channelId: { in: channels.filter((c) => c.directKey).map((c) => c.id) },
+      userId: { not: req.auth!.userId },
+    },
+    select: { channelId: true, user: { select: { name: true } } },
+  });
+  const previews = await db.channel.findMany({
+    where: { id: { in: channels.map((c) => c.id) } },
+    select: {
+      id: true,
+      messages: {
+        where: { deletedAt: null },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 1,
+        select: {
+          content: true,
+          createdAt: true,
+          assets: { select: { name: true }, take: 1 },
+        },
+      },
+    },
+  });
+  return channels.map(({ directKey, ...channel }) => ({
     ...channel,
+    name: directKey
+      ? peers.find((p) => p.channelId === channel.id)?.user.name ||
+        "Direct conversation"
+      : channel.name,
+    isDirect: Boolean(directKey),
+    lastMessage: (() => {
+      const message = previews.find((row) => row.id === channel.id)
+        ?.messages[0];
+      return message
+        ? {
+            text: message.content || message.assets[0]?.name || "Code snippet",
+            timestamp: message.createdAt.toISOString(),
+          }
+        : null;
+    })(),
     memberCount: byId.get(channel.id)!.memberCount,
     unreadCount: byId.get(channel.id)!.unreadCount,
     activeCall: null,
-    canManageChannel: canManageChannel(channel, req),
-    canManageMembers: channel.isPrivate && canManageChannel(channel, req),
+    canManageChannel: !directKey && canManageChannel(channel, req),
+    canManageMembers:
+      !directKey && channel.isPrivate && canManageChannel(channel, req),
     canLeave:
+      !directKey &&
       channel.isPrivate &&
       byId.get(channel.id)!.joined &&
       channel.createdById !== req.auth!.userId,
   }));
 }
-const channelSelect = {
+export const channelSelect = {
   id: true,
+  workspaceId: true,
   name: true,
   topic: true,
   type: true,
   isPrivate: true,
   createdById: true,
+  directKey: true,
 } as const;
 channelsRouter.get(
   "/",
   asyncRoute(async (req: AuthRequest, res) => {
-    const { limit, after, q } = parse(directoryQuery, req.query);
+    const { limit, after, q, allWorkspaces } = parse(directoryQuery.extend({ allWorkspaces: z.enum(["true"]).optional() }), req.query);
     const result = await prisma.$transaction(
       async (tx) => {
         req.auth!.workspaceRole = (
@@ -82,16 +129,25 @@ channelsRouter.get(
               OR: [
                 { name: { contains: q, mode: "insensitive" } },
                 { topic: { contains: q, mode: "insensitive" } },
+                {
+                  directKey: { not: null },
+                  members: {
+                    some: {
+                      userId: { not: req.auth!.userId },
+                      user: { name: { contains: q, mode: "insensitive" } },
+                    },
+                  },
+                },
               ],
             }
           : {};
         const scope: Prisma.ChannelWhereInput = {
-          AND: [channelScope(req), search],
+          AND: [allWorkspaces ? { workspace: { members: { some: { userId: req.auth!.userId } } }, OR: [{ isPrivate: false }, { members: { some: { userId: req.auth!.userId } } }] } : channelScope(req), search],
         };
         const cursor = after
           ? await tx.channel.findFirst({
               where: { AND: [scope, { id: after }] },
-              select: { id: true, createdAt: true },
+              select: { id: true, lastMessageAt: true },
             })
           : null;
         if (after && !cursor)
@@ -104,8 +160,11 @@ channelsRouter.get(
                 ? [
                     {
                       OR: [
-                        { createdAt: { gt: cursor.createdAt } },
-                        { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+                        { lastMessageAt: { lt: cursor.lastMessageAt } },
+                        {
+                          lastMessageAt: cursor.lastMessageAt,
+                          id: { lt: cursor.id },
+                        },
                       ],
                     },
                   ]
@@ -113,7 +172,7 @@ channelsRouter.get(
             ],
           },
           select: channelSelect,
-          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
           take: limit + 1,
         });
         const page = directoryPage(
@@ -127,6 +186,59 @@ channelsRouter.get(
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
     res.json(result);
+  }),
+);
+// A pair has one direct conversation per workspace. The workspace gate serializes
+// creation with membership changes and concurrent requests from either participant.
+channelsRouter.post(
+  "/direct",
+  asyncRoute(async (req: AuthRequest, res) => {
+    const { userId } = parse(
+      z.object({ userId: z.string().min(1).max(128) }).strict(),
+      req.body,
+    );
+    if (userId === req.auth!.userId)
+      throw new HttpError(400, "Choose another person");
+    const result = await prisma.$transaction(async (tx) => {
+      await lockWorkspace(tx, req.auth!.workspaceId!);
+      await workspaceActor(tx, req, req.auth!.workspaceId!);
+      const target = await tx.workspaceMember.findUnique({
+        where: {
+          workspaceId_userId: { workspaceId: req.auth!.workspaceId!, userId },
+        },
+      });
+      if (!target) throw new HttpError(404, "Person not found in this group");
+      const key = createHash("sha256")
+        .update(
+          JSON.stringify([
+            req.auth!.workspaceId,
+            ...[userId, req.auth!.userId].sort(),
+          ]),
+        )
+        .digest("hex");
+      const channel = await tx.channel.upsert({
+        where: { directKey: key },
+        update: {},
+        create: {
+          workspaceId: req.auth!.workspaceId!,
+          name: `dm-${key}`,
+          directKey: key,
+          isPrivate: true,
+          members: { create: [{ userId }, { userId: req.auth!.userId }] },
+        },
+        select: channelSelect,
+      });
+      // Rejoining a workspace can restore the same pair; never enroll a third person.
+      await tx.channelMember.createMany({
+        data: [userId, req.auth!.userId].map((id) => ({
+          channelId: channel.id,
+          userId: id,
+        })),
+        skipDuplicates: true,
+      });
+      return (await formatChannels([channel], req, tx))[0];
+    });
+    res.json({ data: result });
   }),
 );
 channelsRouter.get(
@@ -149,21 +261,39 @@ channelsRouter.get(
     res.json({ data });
   }),
 );
+channelsRouter.post("/groups", asyncRoute(async (req: AuthRequest, res) => {
+  const input = parse(z.object({ name: z.string().trim().min(1).max(80), memberIds: z.array(z.string().min(1).max(128)).min(1).max(99), clientMutationId: z.string().min(8).max(128) }).strict(), req.body);
+  const members = [...new Set(input.memberIds)].filter((id) => id !== req.auth!.userId).sort();
+  if (!members.length) throw new HttpError(400, "Select at least one other person");
+  const digest = createHash("sha256").update(JSON.stringify([req.auth!.userId, input.clientMutationId])).digest("hex");
+  const id = "group_" + digest;
+  const workspaceId = "group_space_" + digest;
+  const data = await prisma.$transaction(async (tx) => {
+    await lockWorkspace(tx, workspaceId);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('group-create'), hashtext(${id}))`;
+    const existing = await tx.channel.findUnique({ where: { id }, include: { members: { select: { userId: true } } } });
+    if (existing) {
+      const existingMembers = existing.members.map((member) => member.userId).filter((member) => member !== req.auth!.userId).sort();
+      if (existing.name !== input.name || JSON.stringify(existingMembers) !== JSON.stringify(members)) throw new HttpError(409, "This group request was already used. Reopen New Group to start a different group.");
+      return (await formatChannels([existing], req, tx))[0];
+    }
+    const count = await tx.user.count({ where: { id: { in: members }, account: { isNot: null } } });
+    if (count !== members.length) throw new HttpError(400, "Some selected people are no longer available. Refresh your contacts.");
+    await tx.workspace.create({ data: { id: workspaceId, name: input.name, members: { create: [req.auth!.userId, ...members].map((userId) => ({ userId, role: userId === req.auth!.userId ? "owner" : "member" })) } } });
+    const created = await tx.channel.create({ data: { id, workspaceId, createdById: req.auth!.userId, name: input.name, isPrivate: true, type: "text", members: { create: [req.auth!.userId, ...members].map((userId) => ({ userId })) } }, select: channelSelect });
+    await tx.auditEvent.create({ data: { workspaceId, actorId: req.auth!.userId, action: "channel.create", targetId: created.id } });
+    return (await formatChannels([created], req, tx))[0];
+  });
+  res.status(201).json({ data });
+}));
+
 channelsRouter.post(
   "/",
   asyncRoute(async (req: AuthRequest, res) => {
     const input = parse(
       z
         .object({
-          name: z
-            .string()
-            .trim()
-            .min(1)
-            .max(80)
-            .regex(
-              /^[a-z0-9][a-z0-9_-]*$/,
-              "Use lowercase letters, numbers, hyphens or underscores",
-            ),
+          name: z.string().trim().min(1).max(80),
           topic: z.string().trim().max(500).default(""),
           type: z.enum(["text", "audio", "video"]).default("text"),
           isPrivate: z.boolean().default(false),
@@ -206,6 +336,8 @@ async function managedChannel(
 ) {
   await lockChannel(tx, id);
   const channel = await accessibleChannel(req, id, tx);
+  if (channel.directKey)
+    throw new HttpError(403, "Direct conversation membership is fixed");
   const actor = await workspaceActor(tx, req, channel.workspaceId);
   if (
     !["owner", "admin"].includes(actor.role) &&
@@ -222,16 +354,7 @@ channelsRouter.patch(
     const input = parse(
       z
         .object({
-          name: z
-            .string()
-            .trim()
-            .min(1)
-            .max(80)
-            .regex(
-              /^[a-z0-9][a-z0-9_-]*$/,
-              "Use lowercase letters, numbers, hyphens or underscores",
-            )
-            .optional(),
+          name: z.string().trim().min(1).max(80).optional(),
           topic: z.string().trim().max(500).optional(),
         })
         .strict()

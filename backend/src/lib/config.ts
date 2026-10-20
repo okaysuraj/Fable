@@ -1,7 +1,25 @@
 /** Validate server-only configuration at startup; never log connection URLs or credentials. */
 import "dotenv/config";
+import { createHash } from "node:crypto";
+import { z } from "zod";
 
 const production = process.env.NODE_ENV === "production";
+const devAuthEnabled = process.env.DEV_AUTH_ENABLED === "true";
+if (devAuthEnabled && process.env.NODE_ENV !== "development")
+  throw new Error("DEV_AUTH_ENABLED is only allowed with NODE_ENV=development");
+const devProfile = devAuthEnabled
+  ? z
+      .object({
+        email: z.email().max(254),
+        name: z.string().trim().min(1).max(80),
+      })
+      .parse({
+        email: (process.env.DEV_AUTH_EMAIL || "developer@fable.local")
+          .trim()
+          .toLowerCase(),
+        name: process.env.DEV_AUTH_NAME || "Local developer",
+      })
+  : undefined;
 if (production && !process.env.FRONTEND_URL)
   throw new Error("Production FRONTEND_URL must be explicitly configured");
 if (
@@ -92,6 +110,12 @@ if (production) {
 }
 export const config = {
   production,
+  devIdentity: devProfile
+    ? {
+        ...devProfile,
+        uid: `fable-development:${createHash("sha256").update(devProfile.email).digest("hex")}`,
+      }
+    : undefined,
   port: Number(process.env.PORT || 5000),
   origins,
 };

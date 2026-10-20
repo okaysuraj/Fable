@@ -11,8 +11,23 @@ export const reactionIcons = [
   "thumbs-up",
   "laugh",
   "eyes",
+  "👎",
+  "😂",
+  "‼️",
+  "❓",
+  "❤️",
+  "👍",
+  "🎉",
+  "😮",
+  "😢",
+  "🔥",
+  "🙏",
+  "😍",
 ] as const;
-export const messageInclude = { sender: { select: publicUserSelect } } as const;
+export const messageInclude = {
+  sender: { select: publicUserSelect },
+  assets: { select: { id: true, name: true, mimeType: true, size: true } },
+} as const;
 export type MessageWithRelations = Prisma.MessageGetPayload<{
   include: typeof messageInclude;
 }>;
@@ -30,9 +45,10 @@ export function formatMessage(
     timestamp: message.createdAt.toISOString(),
     createdAt: message.createdAt.toISOString(),
     content: active ? message.content : "",
+    replyToId: active ? message.replyToId : null,
     codeSnippet: active ? message.codeSnippet : null,
     voiceNote: null,
-    attachments: [],
+    attachments: active ? message.assets : [],
     isPinned: active && message.isPinned,
     reactions: active ? reactions : [],
     version: message.version,
@@ -48,7 +64,7 @@ export function formatMessage(
 }
 
 // Only selected, already-authorized message IDs enter this query. PostgreSQL reduces
-// participants to at most six rows per message; Node never loads individual reactions.
+// participants to the supported emoji rows per message; Node never loads individual reactions.
 // Mutation callers pass their transaction so counts and the returned version agree.
 export async function formatMessages(
   messages: MessageWithRelations[],

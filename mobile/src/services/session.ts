@@ -11,11 +11,17 @@ import {
   updateProfile,
   reload,
   onAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithCredential,
+  type User as FirebaseUser,
 } from "firebase/auth";
 import { getFirebaseAuth } from "./firebase";
 import { FirebaseError } from "firebase/app";
 import type { User } from "@/types/chat";
 import { ApiError, requestJson } from "./request";
+import { devAuthEnabled } from "./developmentAuth";
+import { firebaseConfigured } from "./firebaseConfig";
+import { getGoogleIdToken } from "./googleSignIn";
 
 export { ApiError } from "./request";
 export function authError(error: unknown): string {
@@ -38,7 +44,9 @@ export function authError(error: unknown): string {
     "auth/network-request-failed":
       "Cannot reach authentication. Check your connection and try again.",
     "auth/operation-not-allowed":
-      "Email/password sign-in is not enabled for this Firebase project.",
+      "This sign-in method hasn't been enabled for Fable yet.",
+    "auth/account-exists-with-different-credential":
+      "This account uses another sign-in method. Sign in with the method you originally used.",
     "auth/user-disabled":
       "Your account is unavailable. Contact your administrator.",
   };
@@ -53,6 +61,7 @@ let selectedWorkspace: string | null = null;
 let workspaceLoaded = false;
 
 export function onSessionExpired(listener: () => void): () => void {
+  if (devAuthEnabled || !firebaseConfigured) return () => {};
   const auth = getFirebaseAuth();
   let previouslySignedIn = Boolean(auth.currentUser);
   return onAuthStateChanged(auth, (user) => {
@@ -64,6 +73,8 @@ export function onSessionExpired(listener: () => void): () => void {
 export async function getSessionToken(): Promise<string | null> {
   // Obsolete locally signed sessions must not become Firebase sessions.
   await (legacyCleanup ??= AsyncStorage.removeItem(TOKEN_KEY));
+  if (devAuthEnabled) return "fable-development";
+  if (!firebaseConfigured) return null;
   const auth = getFirebaseAuth();
   await auth.authStateReady();
   const user = auth.currentUser;
@@ -111,6 +122,8 @@ export function getApiBaseUrl(): string {
 export async function request<T>(
   path: string,
   init: RequestInit = {},
+  responseType: "json" | "blob" = "json",
+  workspaceIdOverride?: string,
 ): Promise<T> {
   const token = await getSessionToken();
   if (!token) throw new ApiError("Please sign in to continue.", 401);
@@ -125,21 +138,28 @@ export async function request<T>(
         /^\/workspace\/(?!audit(?:\?|$)|invitations(?:\?|$))[^/?]+(?:\?|$)/.test(
           path,
         ));
-    return await requestJson<T>(`${getApiBaseUrl()}${path}`, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(selectedWorkspace &&
-        !path.startsWith("/auth/") &&
-        !identityWorkspaceRead
-          ? { "X-Workspace-Id": selectedWorkspace }
-          : {}),
+    const headers = new Headers(init.headers);
+    if (!headers.has("Content-Type"))
+      headers.set("Content-Type", "application/json");
+    headers.set("Authorization", `Bearer ${token}`);
+    if (
+      (workspaceIdOverride || selectedWorkspace) &&
+      !path.startsWith("/auth/") &&
+      !identityWorkspaceRead
+    )
+      headers.set("X-Workspace-Id", workspaceIdOverride || selectedWorkspace!);
+    return await requestJson<T>(
+      `${getApiBaseUrl()}${path}`,
+      {
+        ...init,
+        headers,
       },
-    });
+      15000,
+      responseType,
+    );
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
-      await signOut(getFirebaseAuth());
+      if (!devAuthEnabled) await signOut(getFirebaseAuth());
       await selectWorkspace(null);
     }
     throw error;
@@ -159,15 +179,19 @@ async function authenticate(
 ): Promise<AuthResponse> {
   const auth = getFirebaseAuth();
   const result = await signInWithEmailAndPassword(auth, email.trim(), password);
-  await reload(result.user);
-  if (!result.user.emailVerified) {
-    await signOut(auth);
+  return finishAuthentication(result.user);
+}
+
+async function finishAuthentication(user: FirebaseUser): Promise<AuthResponse> {
+  await reload(user);
+  if (!user.emailVerified) {
+    await signOut(getFirebaseAuth());
     throw new ApiError(
       "Verify your email using the link in your inbox before signing in.",
       403,
     );
   }
-  await result.user.getIdToken(true);
+  await user.getIdToken(true);
   await selectWorkspace(null);
   const response = await request<{ user: User }>("/auth/session", {
     method: "POST",
@@ -176,6 +200,12 @@ async function authenticate(
 }
 
 export const session = {
+  async startDevelopment(): Promise<AuthResponse> {
+    if (!devAuthEnabled)
+      throw new Error("Development authentication is disabled.");
+    await selectWorkspace(null);
+    return request<AuthResponse>("/auth/session", { method: "POST" });
+  },
   async register(
     email: string,
     password: string,
@@ -200,6 +230,16 @@ export const session = {
     }
   },
   login: authenticate,
+  async loginWithGoogle(): Promise<AuthResponse | null> {
+    const auth = getFirebaseAuth();
+    const idToken = await getGoogleIdToken();
+    if (!idToken) return null;
+    const result = await signInWithCredential(
+      auth,
+      GoogleAuthProvider.credential(idToken),
+    );
+    return finishAuthentication(result.user);
+  },
   async fetchMe(
     options: { signal?: AbortSignal } = {},
   ): Promise<{ user: User }> {
@@ -212,7 +252,7 @@ export const session = {
       if (
         error instanceof ApiError &&
         error.status === 403 &&
-        error.message === "Create your verified Fable session first"
+        error.message === "Create your Fable session first"
       ) {
         return request<{ user: User }>("/auth/session", {
           method: "POST",
@@ -251,8 +291,12 @@ export const session = {
   },
   async logout(): Promise<void> {
     // Normal sign-out affects this device. Server revocation is an explicit all-device action.
-    await signOut(getFirebaseAuth());
-    await selectWorkspace(null);
+    try {
+      if (!devAuthEnabled && firebaseConfigured)
+        await signOut(getFirebaseAuth());
+    } finally {
+      await selectWorkspace(null);
+    }
   },
   async logoutAllDevices(): Promise<void> {
     await request("/auth/logout", { method: "POST" });

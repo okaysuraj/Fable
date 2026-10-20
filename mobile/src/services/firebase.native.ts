@@ -10,6 +10,7 @@ import {
 import * as FirebaseAuth from "firebase/auth";
 import * as SecureStore from "expo-secure-store";
 import { createSecurePersistence } from "./securePersistence";
+import { firebaseConfig, firebaseConfigured } from "./firebaseConfig";
 
 let instance: Auth | undefined;
 
@@ -26,13 +27,7 @@ const storage = createSecurePersistence({
 
 export function getFirebaseAuth(): Auth {
   if (instance) return instance;
-  const config = {
-    apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
-    authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
-    projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
-    appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
-  };
-  if (Object.values(config).some((value) => !value)) {
+  if (!firebaseConfigured) {
     throw new Error(
       "Firebase is not configured. Set the EXPO_PUBLIC_FIREBASE_* environment variables.",
     );
@@ -42,7 +37,7 @@ export function getFirebaseAuth(): Auth {
     throw new Error(
       "Firebase emulator must never be enabled in a production app.",
     );
-  const app = getApps().length ? getApp() : initializeApp(config);
+  const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
   // The SDK's native entry exports this documented API; its generic web types do not.
   const nativeSdk = FirebaseAuth as typeof FirebaseAuth & {
     getReactNativePersistence(value: typeof storage): Persistence;

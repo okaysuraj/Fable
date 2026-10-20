@@ -5,6 +5,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -29,6 +30,7 @@ interface Props {
   onEdit: (message: Message, content: string) => Promise<void>;
   onDelete: (message: Message) => Promise<void>;
   onPin: (message: Message, isPinned: boolean) => Promise<void>;
+  onToggleReaction: (id: string, icon: string) => void;
 }
 
 export function MessageActionsModal({
@@ -38,6 +40,7 @@ export function MessageActionsModal({
   onEdit,
   onDelete,
   onPin,
+  onToggleReaction,
 }: Props) {
   const styles = useBrutalStyles(createStyles);
   const [mode, setMode] = useState<"actions" | "edit" | "delete">("actions");
@@ -128,6 +131,47 @@ export function MessageActionsModal({
                 ) : (
                   <Text style={styles.preview}>Code snippet</Text>
                 )}
+                {!message.deletedAt && (
+                  <View style={styles.reactions}>
+                    {[
+                      { icon: "👎", symbol: "👎" },
+                      { icon: "‼️", symbol: "‼️" },
+                      { icon: "❓", symbol: "❓" },
+                      { icon: "🎉", symbol: "🎉" },
+                      { icon: "😮", symbol: "😮" },
+                      { icon: "😢", symbol: "😢" },
+                      { icon: "heart", symbol: "♥" },
+                      { icon: "thumbs-up", symbol: "👍" },
+                      { icon: "laugh", symbol: "😄" },
+                      { icon: "check", symbol: "✓" },
+                      { icon: "eyes", symbol: "👀" },
+                      { icon: "sparkle", symbol: "✦" },
+                    ].map(({ icon, symbol }) => {
+                      const selected = message.reactions?.some(
+                        (reaction) =>
+                          reaction.icon === icon && reaction.reactedByMe,
+                      );
+                      return (
+                        <Pressable
+                          key={icon}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${selected ? "Remove" : "Add"} ${icon} reaction`}
+                          accessibilityState={{ selected: Boolean(selected) }}
+                          style={[
+                            styles.reaction,
+                            selected && styles.selectedReaction,
+                          ]}
+                          onPress={() => {
+                            onToggleReaction(message.id, icon);
+                            onClose();
+                          }}
+                        >
+                          <Text style={styles.reactionSymbol}>{symbol}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
                 {permissions.edit && (
                   <BrutalButton
                     title="Edit message"
@@ -178,7 +222,7 @@ export function MessageActionsModal({
                 {baseMessage.version !== message.version &&
                   !message.deletedAt && (
                     <View style={styles.conflict}>
-                      <Text accessibilityRole="alert">
+                      <Text accessibilityRole="alert" style={styles.preview}>
                         This message changed while you were editing. Your draft
                         has been kept.
                       </Text>
@@ -199,7 +243,7 @@ export function MessageActionsModal({
                     </View>
                   )}
                 <BrutalButton
-                  title={busy ? "Saving..." : "Save changes"}
+                  title={busy ? "Saving…" : "Save changes"}
                   disabled={
                     busy ||
                     Boolean(message.deletedAt) ||
@@ -229,7 +273,7 @@ export function MessageActionsModal({
                 {baseMessage.version !== message.version &&
                   !message.deletedAt && (
                     <View style={styles.conflict}>
-                      <Text accessibilityRole="alert">
+                      <Text accessibilityRole="alert" style={styles.preview}>
                         This message changed. Review the latest text before
                         deleting.
                       </Text>
@@ -246,7 +290,7 @@ export function MessageActionsModal({
                     </View>
                   )}
                 <BrutalButton
-                  title={busy ? "Deleting..." : "Delete message"}
+                  title={busy ? "Deleting…" : "Delete message"}
                   variant="pink"
                   disabled={
                     busy ||
@@ -273,6 +317,27 @@ export function MessageActionsModal({
 }
 const createStyles = (BrutalColors: BrutalPalette) =>
   StyleSheet.create({
+    reactions: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+      paddingVertical: 8,
+    },
+    reaction: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: BrutalColors.border,
+      backgroundColor: BrutalColors.bgCardAlt,
+    },
+    selectedReaction: {
+      borderColor: BrutalColors.primary,
+      backgroundColor: BrutalColors.selection,
+    },
+    reactionSymbol: { color: BrutalColors.ink, fontSize: 23 },
     overlay: {
       flex: 1,
       justifyContent: "flex-end",
@@ -281,7 +346,7 @@ const createStyles = (BrutalColors: BrutalPalette) =>
     sheet: {
       maxHeight: "85%",
       backgroundColor: BrutalColors.bgPaper,
-      borderTopWidth: 3,
+      borderTopWidth: 1,
       borderColor: BrutalColors.border,
     },
     content: { padding: 20, gap: 16 },
@@ -293,9 +358,9 @@ const createStyles = (BrutalColors: BrutalPalette) =>
     },
     title: {
       flex: 1,
-      fontFamily: Fonts.sans,
+      fontFamily: Fonts.display,
       fontSize: 22,
-      fontWeight: "900",
+      fontWeight: "400",
       color: BrutalColors.ink,
     },
     meta: {
@@ -305,11 +370,22 @@ const createStyles = (BrutalColors: BrutalPalette) =>
     },
     preview: {
       fontFamily: Fonts.sans,
-      fontSize: 16,
-      lineHeight: 24,
+      fontSize: 18,
+      lineHeight: 25,
       color: BrutalColors.ink,
     },
-    editor: { minHeight: 160, maxHeight: 300, textAlignVertical: "top" },
-    error: { padding: 12, backgroundColor: "#FFE0E9", color: "#1A1A1A" },
+    editor: {
+      minHeight: 160,
+      maxHeight: 300,
+      textAlignVertical: "top",
+      fontFamily: Fonts.sans,
+      fontSize: 18,
+      lineHeight: 25,
+    },
+    error: {
+      padding: 12,
+      backgroundColor: BrutalColors.dangerSurface,
+      color: BrutalColors.accentPink,
+    },
     conflict: { padding: 12, backgroundColor: BrutalColors.bgCardAlt, gap: 12 },
   });

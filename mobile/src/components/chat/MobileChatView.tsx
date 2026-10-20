@@ -1,5 +1,7 @@
 /** Own virtualized history navigation, composer drafts and native keyboard/scroll interactions. */
 import { MessageRow } from "./MessageRow";
+import { useConversationPresence } from "./useConversationPresence";
+import { useCalling } from "../calling/CallingProvider";
 import {
   useBrutalTheme,
   useBrutalStyles,
@@ -17,7 +19,6 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   View,
@@ -25,19 +26,29 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useReducedMotion } from "react-native-reanimated";
 import { Fonts } from "@/constants/theme";
-import { Channel, Message, User } from "@/types/chat";
+import { Channel, Message, User, MediaAsset } from "@/types/chat";
+import { MediaComposer } from "./MediaComposer";
+import { MediaPreviewProvider } from "./MediaPreviewContext";
 import { BrutalInput } from "../brutal/BrutalInput";
 import { MessageActionsModal } from "./MessageActionsModal";
+import { NavigationMenuButton } from "../NavigationDrawer";
+import { AppIcon } from "../ui/AppIcon";
+import { MotionPressable as Pressable } from "../ui/MotionPressable";
 
 interface MobileChatViewProps {
+  hideBackButton?: boolean;
   channel: Channel;
+  currentUser: User;
   messages: Message[];
   teamMembers: User[];
-  onSendMessage: (content: string) => Promise<void>;
+  onSendMessage: (
+    content: string,
+    replyToId?: string,
+    attachmentIds?: string[],
+  ) => Promise<void>;
   onToggleReaction: (messageId: string, icon: string) => void;
   onToggleDrawer: () => void;
-  onOpenContextDrawer: () => void;
-  onOpenMessageSearch: () => void;
+  onOpenNavigation: () => void;
   highlightedMessageId?: string | null;
   loading?: boolean;
   onEditMessage: (message: Message, content: string) => Promise<void>;
@@ -63,14 +74,15 @@ interface MobileChatViewProps {
 }
 const keyExtractor = (item: Message) => item.id;
 export const MobileChatView: React.FC<MobileChatViewProps> = ({
+  hideBackButton = false,
   channel,
+  currentUser,
   messages,
   teamMembers,
   onSendMessage,
   onToggleReaction,
   onToggleDrawer,
-  onOpenContextDrawer,
-  onOpenMessageSearch,
+  onOpenNavigation,
   highlightedMessageId,
   loading = false,
   archive,
@@ -94,6 +106,15 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
   const BrutalColors = useBrutalTheme();
   const styles = useBrutalStyles(createStyles);
   const [inputText, setInputText] = useState("");
+  const [assets, setAssets] = useState<MediaAsset[]>([]);
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const calling = useCalling();
+  const [reply, setReply] = useState<Message | null>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const { presence, available } = useConversationPresence(
+    channel.id,
+    inputText,
+  );
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
   const [showPinned, setShowPinned] = useState(false);
@@ -136,9 +157,41 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
         onToggleReaction={onToggleReaction}
         onOpenActions={openActions}
         highlighted={item.id === highlightedMessageId}
+        isSelf={item.sender.id === currentUser.id}
+        onReply={setReply}
+        replyPreview={
+          item.replyToId
+            ? (() => {
+                const parent = messages.find((m) => m.id === item.replyToId);
+                return parent
+                  ? parent.deletedAt
+                    ? "Deleted message"
+                    : `${parent.sender.name}: ${parent.content}`
+                  : "Earlier message";
+              })()
+            : undefined
+        }
+        receipt={
+          presence?.receipt?.messageId === item.id
+            ? presence.receipt.readCount > 0
+              ? channel.isDirect
+                ? "Read"
+                : `Read by ${presence.receipt.readCount}`
+              : "Sent"
+            : undefined
+        }
       />
     ),
-    [onToggleReaction, profiles, openActions, highlightedMessageId],
+    [
+      onToggleReaction,
+      profiles,
+      openActions,
+      highlightedMessageId,
+      currentUser.id,
+      messages,
+      presence,
+      channel.isDirect,
+    ],
   );
   useEffect(() => {
     focusRetries.current = 0;
@@ -169,14 +222,26 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
     loading,
   ]);
   const handleSend = async () => {
-    if (!inputText.trim() || sendInFlight.current) return;
+    if (
+      (!inputText.trim() && !assets.length) ||
+      sendInFlight.current ||
+      mediaBusy
+    )
+      return;
     sendInFlight.current = true;
     setSending(true);
     setSendError("");
     const content = inputText.trim();
     try {
-      await onSendMessage(content);
+      await onSendMessage(
+        content,
+        reply?.id,
+        assets.map((a) => a.id),
+      );
       setInputText("");
+      setReply(null);
+      setEmojiOpen(false);
+      setAssets([]);
       setShowPinned(false);
       onPinnedViewChanged(false);
       nearBottom.current = true;
@@ -197,282 +262,461 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["left", "right", "bottom"]}>
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        <View style={styles.header}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open workspace menu"
-            onPress={onToggleDrawer}
-            style={styles.menuBtn}
-            hitSlop={8}
-          >
-            <Text style={styles.menuBtnText}>☰</Text>
-          </Pressable>
-          <View style={styles.channelMeta}>
-            <View style={styles.channelTitleRow}>
-              <View style={styles.channelBadge}>
-                <Text style={styles.channelBadgeText}>#</Text>
+    <MediaPreviewProvider>
+      <SafeAreaView style={styles.safeArea} edges={["left", "right", "bottom"]}>
+        <KeyboardAvoidingView
+          style={styles.container}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <View style={styles.header}>
+            {!hideBackButton && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Back to chats"
+                onPress={onToggleDrawer}
+                style={styles.menuBtn}
+                hitSlop={8}
+              >
+                <AppIcon name="back" size={25} />
+                <Text style={styles.menuBtnText}>Chats</Text>
+              </Pressable>
+            )}
+            <View style={styles.channelMeta}>
+              <View style={styles.channelTitleRow}>
+                <Text style={styles.channelTitle} numberOfLines={1}>
+                  {channel.name}
+                </Text>
               </View>
-              <Text style={styles.channelTitle} numberOfLines={1}>
-                {channel.name}
+              <Text style={styles.channelTopic} numberOfLines={1}>
+                {channel.topic ||
+                  `${channel.memberCount} ${channel.memberCount === 1 ? "person" : "people"}`}
               </Text>
             </View>
-            <Text style={styles.channelTopic} numberOfLines={1}>
-              {channel.topic}
-            </Text>
+            <View style={styles.headerActions}>
+              {channel.isDirect && (
+                <>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Start audio call"
+                    onPress={() =>
+                      calling.start(channel.id, "audio", channel.name)
+                    }
+                    style={styles.headerActionBtn}
+                  >
+                    <AppIcon name="call" size={23} />
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Start video call"
+                    onPress={() =>
+                      calling.start(channel.id, "video", channel.name)
+                    }
+                    style={styles.headerActionBtn}
+                  >
+                    <AppIcon name="video" size={25} />
+                  </Pressable>
+                </>
+              )}
+              <NavigationMenuButton onPress={onOpenNavigation} />
+            </View>
           </View>
-          <View style={styles.headerActions}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Search message history"
-              onPress={onOpenMessageSearch}
-              style={styles.headerActionBtn}
-              hitSlop={8}
-            >
-              <Text style={styles.headerActionIcon}>⌕</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="View channel details"
-              onPress={onOpenContextDrawer}
-              style={styles.headerActionBtn}
-              hitSlop={8}
-            >
-              <Text style={styles.headerActionIcon}>ⓘ</Text>
-            </Pressable>
-          </View>
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={
-            showPinned ? "Back to conversation" : "Pinned messages"
-          }
-          onPress={() => {
-            setShowPinned((value) => !value);
-            onPinnedViewChanged(!showPinned);
-            nearBottom.current = true;
-          }}
-          style={styles.pinnedBanner}
-        >
-          <View style={styles.pinnedTag}>
-            <Text style={styles.pinnedTagText}>
-              {showPinned ? "BACK" : "PINNED"}
-            </Text>
-          </View>
-          <Text style={styles.pinnedText} numberOfLines={1}>
-            {showPinned
-              ? "Back to conversation"
-              : `Pinned messages · ${pinnedMessages.length}${hasOlderPins ? "+" : ""}`}
-          </Text>
-        </Pressable>
-        <View
-          style={{
-            padding: 10,
-            flexDirection: "row",
-            flexWrap: "wrap",
-            gap: 8,
-            borderBottomWidth: 2,
-            borderColor: BrutalColors.border,
-          }}
-        >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              showPinned ? "Earlier pins" : "Earlier messages"
-            }
-            disabled={
-              (showPinned ? pinnedLoading : loading) ||
-              !(showPinned ? hasOlderPins : hasOlder)
-            }
-            onPress={() => {
-              nearBottom.current = true;
-              onNavigateHistory("earlier", showPinned);
-            }}
-            style={[
-              styles.historyButton,
-              !(showPinned ? hasOlderPins : hasOlder) && { opacity: 0.4 },
-            ]}
-          >
-            <Text style={styles.messageText}>
-              {showPinned ? "Earlier pins" : "Earlier messages"}
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={showPinned ? "Newer pins" : "Newer messages"}
-            disabled={
-              (showPinned ? pinnedLoading : loading) ||
-              !(showPinned ? hasNewerPins : hasNewer)
-            }
-            onPress={() => {
-              nearBottom.current = true;
-              onNavigateHistory("newer", showPinned);
-            }}
-            style={[
-              styles.historyButton,
-              !(showPinned ? hasNewerPins : hasNewer) && { opacity: 0.4 },
-            ]}
-          >
-            <Text style={styles.messageText}>
-              {showPinned ? "Newer pins" : "Newer messages"}
-            </Text>
-          </Pressable>
-          {(showPinned ? pinsArchive || hasNewerPins : archive || hasNewer) && (
+          {(showPinned || pinnedMessages.length > 0 || hasOlderPins) && (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={
-                showPinned ? "Latest pins" : "Latest messages"
+                showPinned ? "Back to conversation" : "Pinned messages"
               }
-              disabled={showPinned ? pinnedLoading : loading}
               onPress={() => {
+                setShowPinned((value) => !value);
+                onPinnedViewChanged(!showPinned);
                 nearBottom.current = true;
-                onNavigateHistory("latest", showPinned);
               }}
-              style={styles.historyButton}
+              style={styles.pinnedBanner}
             >
-              <Text style={styles.messageText}>
-                {showPinned ? "Latest pins" : "Latest messages"}
+              <View style={styles.pinnedTag}>
+                <Text style={styles.pinnedTagText}>
+                  {showPinned ? "Back" : "Pinned"}
+                </Text>
+              </View>
+              <Text style={styles.pinnedText} numberOfLines={1}>
+                {showPinned
+                  ? "Back to conversation"
+                  : `Pinned messages · ${pinnedMessages.length}${hasOlderPins ? "+" : ""}`}
               </Text>
             </Pressable>
           )}
-        </View>
-        <FlatList
-          key={
-            showPinned
-              ? `pinned:${pinPageRevision}`
-              : `conversation:${pageRevision}`
-          }
-          ref={flatListRef}
-          inverted
-          data={reversedMessages}
-          keyExtractor={keyExtractor}
-          renderItem={renderMessageItem}
-          contentContainerStyle={styles.messagesList}
-          onScrollToIndexFailed={(info) => {
-            if (focusRetries.current >= 2) return;
-            focusRetries.current += 1;
-            flatListRef.current?.scrollToOffset({
-              offset: Math.max(0, info.averageItemLength * info.index),
-              animated: false,
-            });
-            if (focusTimer.current) clearTimeout(focusTimer.current);
-            focusTimer.current = setTimeout(() => {
-              flatListRef.current?.scrollToIndex({
-                index: info.index,
-                animated: false,
-                viewPosition: 0.5,
-              });
-            }, 100);
-          }}
-          initialNumToRender={16}
-          maxToRenderPerBatch={10}
-          windowSize={7}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-          ListEmptyComponent={
-            <View style={{ padding: 24 }}>
-              {(showPinned ? pinnedLoading : loading) ? (
-                <ActivityIndicator color={BrutalColors.ink} />
-              ) : (
+          {(showPinned
+            ? hasOlderPins || hasNewerPins || pinsArchive
+            : hasOlder || hasNewer || archive) && (
+            <View
+              style={{
+                padding: 10,
+                flexDirection: "row",
+                flexWrap: "wrap",
+                gap: 8,
+                borderBottomWidth: 1,
+                borderColor: BrutalColors.border,
+              }}
+            >
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  showPinned ? "Earlier pins" : "Earlier messages"
+                }
+                disabled={
+                  (showPinned ? pinnedLoading : loading) ||
+                  !(showPinned ? hasOlderPins : hasOlder)
+                }
+                onPress={() => {
+                  nearBottom.current = true;
+                  onNavigateHistory("earlier", showPinned);
+                }}
+                style={[
+                  styles.historyButton,
+                  !(showPinned ? hasOlderPins : hasOlder) && { opacity: 0.4 },
+                ]}
+              >
                 <Text style={styles.messageText}>
-                  {showPinned
-                    ? "No pinned messages."
-                    : "No messages yet. Start the conversation."}
+                  {showPinned ? "Earlier pins" : "Earlier messages"}
                 </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  showPinned ? "Newer pins" : "Newer messages"
+                }
+                disabled={
+                  (showPinned ? pinnedLoading : loading) ||
+                  !(showPinned ? hasNewerPins : hasNewer)
+                }
+                onPress={() => {
+                  nearBottom.current = true;
+                  onNavigateHistory("newer", showPinned);
+                }}
+                style={[
+                  styles.historyButton,
+                  !(showPinned ? hasNewerPins : hasNewer) && { opacity: 0.4 },
+                ]}
+              >
+                <Text style={styles.messageText}>
+                  {showPinned ? "Newer pins" : "Newer messages"}
+                </Text>
+              </Pressable>
+              {(showPinned
+                ? pinsArchive || hasNewerPins
+                : archive || hasNewer) && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    showPinned ? "Latest pins" : "Latest messages"
+                  }
+                  disabled={showPinned ? pinnedLoading : loading}
+                  onPress={() => {
+                    nearBottom.current = true;
+                    onNavigateHistory("latest", showPinned);
+                  }}
+                  style={styles.historyButton}
+                >
+                  <Text style={styles.messageText}>
+                    {showPinned ? "Latest pins" : "Latest messages"}
+                  </Text>
+                </Pressable>
               )}
             </View>
-          }
-          onScroll={(event) => {
-            nearBottom.current = event.nativeEvent.contentOffset.y < 100;
-          }}
-          scrollEventThrottle={64}
-          onContentSizeChange={() => {
-            const next = displayedMessages.at(-1)?.id;
-            if (next !== lastMessage.current && nearBottom.current)
+          )}
+          <FlatList
+            key={
+              showPinned
+                ? `pinned:${pinPageRevision}`
+                : `conversation:${pageRevision}`
+            }
+            ref={flatListRef}
+            inverted
+            data={reversedMessages}
+            keyExtractor={keyExtractor}
+            renderItem={renderMessageItem}
+            contentContainerStyle={styles.messagesList}
+            onScrollToIndexFailed={(info) => {
+              if (focusRetries.current >= 2) return;
+              focusRetries.current += 1;
               flatListRef.current?.scrollToOffset({
-                offset: 0,
-                animated: !reduceMotion,
+                offset: Math.max(0, info.averageItemLength * info.index),
+                animated: false,
               });
-            lastMessage.current = next;
-          }}
-        />
-        {sendError ? (
-          <Text
-            accessibilityRole="alert"
-            style={{
-              padding: 12,
-              color: "#1A1A1A",
-              backgroundColor: "#FFE0E9",
+              if (focusTimer.current) clearTimeout(focusTimer.current);
+              focusTimer.current = setTimeout(() => {
+                flatListRef.current?.scrollToIndex({
+                  index: info.index,
+                  animated: false,
+                  viewPosition: 0.5,
+                });
+              }, 100);
             }}
-          >
-            {sendError}
-          </Text>
-        ) : null}
-        {channel.type === "text" ? (
-          <View style={styles.inputDock}>
-            <BrutalInput
-              accessibilityLabel="Message"
-              value={inputText}
-              editable={!sending}
-              onChangeText={setInputText}
-              placeholder={`Message #${channel.name}...`}
-              maxLength={10000}
-              style={styles.chatInput}
-              onSubmitEditing={() => {
-                void handleSend();
+            initialNumToRender={16}
+            maxToRenderPerBatch={10}
+            windowSize={7}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                {(showPinned ? pinnedLoading : loading) ? (
+                  <ActivityIndicator color={BrutalColors.ink} />
+                ) : (
+                  <>
+                    <View style={styles.emptyIcon}>
+                      <AppIcon name="chats" size={28} />
+                    </View>
+                    <Text style={styles.emptyTitle}>
+                      {showPinned ? "Keep the details close" : "Say hello"}
+                    </Text>
+                    <Text style={styles.emptyCopy}>
+                      {showPinned
+                        ? "Pin a message from the conversation to find it here."
+                        : channel.topic ||
+                          `Send the first message in ${channel.name}.`}
+                    </Text>
+                  </>
+                )}
+              </View>
+            }
+            onScroll={(event) => {
+              nearBottom.current = event.nativeEvent.contentOffset.y < 100;
+            }}
+            scrollEventThrottle={64}
+            onContentSizeChange={() => {
+              const next = displayedMessages.at(-1)?.id;
+              if (next !== lastMessage.current && nearBottom.current)
+                flatListRef.current?.scrollToOffset({
+                  offset: 0,
+                  animated: !reduceMotion,
+                });
+              lastMessage.current = next;
+            }}
+          />
+          {!!presence?.typing.length && (
+            <Text
+              accessibilityLiveRegion="polite"
+              style={{
+                paddingHorizontal: 20,
+                paddingVertical: 8,
+                color: BrutalColors.inkMuted,
               }}
-              returnKeyType="send"
-            />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Send message"
-              accessibilityState={{
-                disabled: sending || !inputText.trim(),
-                busy: sending,
-              }}
-              disabled={sending || !inputText.trim()}
-              onPress={() => {
-                void handleSend();
-              }}
-              style={[
-                styles.sendBtn,
-                (sending || !inputText.trim()) && { opacity: 0.5 },
-              ]}
             >
-              {sending ? (
-                <ActivityIndicator color={BrutalColors.ink} />
-              ) : (
-                <Text style={styles.sendBtnText}>→</Text>
-              )}
-            </Pressable>
-          </View>
-        ) : (
-          <Text style={[styles.messageText, { padding: 16 }]}>
-            Live audio and video are unavailable until the calling service is
-            configured. Choose a text channel to send messages.
-          </Text>
+              {presence.typing.map((p) => p.name).join(", ")}{" "}
+              {presence.typing.length === 1 ? "is" : "are"} typing…
+            </Text>
+          )}
+          {!available && (
+            <Text
+              style={{ paddingHorizontal: 20, color: BrutalColors.inkMuted }}
+            >
+              Live status unavailable
+            </Text>
+          )}
+          {reply && (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                padding: 12,
+                backgroundColor: BrutalColors.bgCardAlt,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: BrutalColors.primary }}>
+                  Replying to {reply.sender.name}
+                </Text>
+                <Text
+                  numberOfLines={1}
+                  style={{ color: BrutalColors.inkMuted }}
+                >
+                  {reply.content}
+                </Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Cancel reply"
+                onPress={() => setReply(null)}
+                style={{ padding: 14 }}
+              >
+                <AppIcon name="close" size={21} />
+              </Pressable>
+            </View>
+          )}
+          {emojiOpen && (
+            <View
+              accessibilityLabel="Emoji"
+              style={{
+                flexDirection: "row",
+                flexWrap: "wrap",
+                padding: 8,
+                backgroundColor: BrutalColors.bgCardAlt,
+              }}
+            >
+              {[
+                "😀",
+                "😂",
+                "🥹",
+                "😍",
+                "😎",
+                "🤔",
+                "😮",
+                "😢",
+                "😭",
+                "❤️",
+                "👍",
+                "👎",
+                "🙏",
+                "🎉",
+                "🔥",
+                "✨",
+                "💯",
+                "👋",
+                "🤝",
+                "🫶",
+                "🥳",
+                "😊",
+                "🤩",
+                "🤣",
+                "😅",
+                "🙃",
+                "😴",
+                "🙌",
+                "💙",
+                "✅",
+                "🎂",
+                "🌈",
+              ].map((emoji) => (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Insert ${emoji}`}
+                  key={emoji}
+                  disabled={sending || inputText.length + emoji.length > 10000}
+                  onPress={() => setInputText((t) => t + emoji)}
+                  style={{
+                    width: "12.5%",
+                    minHeight: 48,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text style={{ fontSize: 26 }}>{emoji}</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+          {sendError ? (
+            <Text
+              accessibilityRole="alert"
+              style={{
+                padding: 12,
+                color: BrutalColors.accentPink,
+                backgroundColor: BrutalColors.dangerSurface,
+              }}
+            >
+              {sendError}
+            </Text>
+          ) : null}
+          {channel.type === "text" && (
+            <MediaComposer
+              channelId={channel.id}
+              disabled={sending}
+              assets={assets}
+              onUploaded={(asset) =>
+                setAssets((previous) =>
+                  previous.some((a) => a.id === asset.id)
+                    ? previous
+                    : [...previous, asset],
+                )
+              }
+              onRemoved={(id) =>
+                setAssets((previous) => previous.filter((a) => a.id !== id))
+              }
+              onBusy={setMediaBusy}
+            />
+          )}
+          {channel.type === "text" ? (
+            <View style={styles.inputDock}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Choose emoji"
+                accessibilityState={{ expanded: emojiOpen }}
+                onPress={() => setEmojiOpen(!emojiOpen)}
+                style={{
+                  minWidth: 44,
+                  minHeight: 48,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <AppIcon name="emoji" size={27} />
+              </Pressable>
+              <BrutalInput
+                accessibilityLabel="Message"
+                value={inputText}
+                editable={!sending}
+                onChangeText={setInputText}
+                placeholder="Message"
+                maxLength={10000}
+                multiline
+                submitBehavior="newline"
+                style={styles.chatInput}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Send message"
+                accessibilityState={{
+                  disabled:
+                    sending ||
+                    mediaBusy ||
+                    (!inputText.trim() && !assets.length),
+                  busy: sending,
+                }}
+                disabled={
+                  sending || mediaBusy || (!inputText.trim() && !assets.length)
+                }
+                onPress={() => {
+                  void handleSend();
+                }}
+                style={[
+                  styles.sendBtn,
+                  (sending ||
+                    mediaBusy ||
+                    (!inputText.trim() && !assets.length)) && { opacity: 0.5 },
+                ]}
+              >
+                {sending ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <AppIcon name="send" size={23} color="#FFFFFF" />
+                )}
+              </Pressable>
+            </View>
+          ) : (
+            <Text style={[styles.messageText, { padding: 16 }]}>
+              Open a direct conversation for an audio or video call. Choose a
+              text chat to send messages.
+            </Text>
+          )}
+        </KeyboardAvoidingView>
+        {selectedMessage && (
+          <MessageActionsModal
+            message={selectedMessage}
+            permissions={{
+              edit: selectedMessage.canEdit,
+              delete: selectedMessage.canDelete,
+              pin: selectedMessage.canPin,
+            }}
+            onClose={() => onActionMessageChanged(null)}
+            onEdit={onEditMessage}
+            onDelete={onDeleteMessage}
+            onPin={onPinMessage}
+            onToggleReaction={onToggleReaction}
+          />
         )}
-      </KeyboardAvoidingView>
-      {selectedMessage && (
-        <MessageActionsModal
-          message={selectedMessage}
-          permissions={{
-            edit: selectedMessage.canEdit,
-            delete: selectedMessage.canDelete,
-            pin: selectedMessage.canPin,
-          }}
-          onClose={() => onActionMessageChanged(null)}
-          onEdit={onEditMessage}
-          onDelete={onDeleteMessage}
-          onPin={onPinMessage}
-        />
-      )}
-    </SafeAreaView>
+      </SafeAreaView>
+    </MediaPreviewProvider>
   );
 };
 const createStyles = (BrutalColors: BrutalPalette) =>
@@ -481,7 +725,7 @@ const createStyles = (BrutalColors: BrutalPalette) =>
       paddingHorizontal: 12,
       paddingVertical: 12,
       minHeight: 44,
-      borderWidth: 2,
+      borderWidth: 1,
       borderColor: BrutalColors.border,
       backgroundColor: BrutalColors.bgCard,
     },
@@ -496,29 +740,31 @@ const createStyles = (BrutalColors: BrutalPalette) =>
       flexDirection: "row",
       alignItems: "center",
       paddingHorizontal: 12,
-      paddingVertical: 10,
-      backgroundColor: BrutalColors.bgCard,
-      borderBottomWidth: 3,
+      paddingVertical: 8,
+      backgroundColor: "transparent",
+      borderBottomWidth: 1,
       borderBottomColor: BrutalColors.border,
-      gap: 10,
+      gap: 6,
     },
     menuBtn: {
-      width: 36,
-      height: 36,
-      borderWidth: 2.5,
+      flexDirection: "row",
+      minWidth: 64,
+      minHeight: 48,
+      borderWidth: 0,
       borderColor: BrutalColors.border,
-      borderRadius: 4,
-      backgroundColor: BrutalColors.accentYellow,
+      borderRadius: 10,
+      backgroundColor: "transparent",
       alignItems: "center",
       justifyContent: "center",
     },
     menuBtnText: {
+      fontFamily: Fonts.sans,
       fontSize: 16,
-      fontWeight: "900",
-      color: "#1A1A1A",
+      color: BrutalColors.primary,
     },
     channelMeta: {
       flex: 1,
+      minWidth: 0,
     },
     channelTitleRow: {
       flexDirection: "row",
@@ -526,49 +772,52 @@ const createStyles = (BrutalColors: BrutalPalette) =>
       gap: 6,
     },
     channelBadge: {
-      width: 20,
-      height: 20,
-      borderWidth: 2,
+      width: 28,
+      height: 28,
+      backgroundColor: "transparent",
+      borderWidth: 0,
       borderColor: BrutalColors.border,
-      borderRadius: 3,
+      borderRadius: 10,
       alignItems: "center",
       justifyContent: "center",
     },
     channelBadgeText: {
-      fontFamily: Fonts?.mono,
-      fontWeight: "900",
-      fontSize: 11,
-      color: BrutalColors.ink,
+      fontFamily: Fonts.semibold,
+      fontWeight: "400",
+      fontSize: 12,
+      color: BrutalColors.selectionInk,
     },
     channelTitle: {
-      fontFamily: Fonts?.sans,
-      fontWeight: "900",
-      fontSize: 16,
+      fontFamily: Fonts.sans,
+      fontWeight: "400",
+      fontSize: 22,
+      lineHeight: 28,
       color: BrutalColors.ink,
     },
     channelTopic: {
-      fontFamily: Fonts?.sans,
-      fontSize: 11,
+      fontFamily: Fonts.medium,
+      fontSize: 12,
       color: BrutalColors.inkMuted,
-      fontWeight: "500",
+      fontWeight: "400",
     },
     headerActions: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 6,
+      gap: 2,
     },
     headerActionBtn: {
-      width: 34,
-      height: 34,
-      borderWidth: 2,
+      width: 44,
+      height: 44,
+      borderWidth: 0,
       borderColor: BrutalColors.border,
-      borderRadius: 4,
-      backgroundColor: BrutalColors.bgCardAlt,
+      borderRadius: 10,
+      backgroundColor: "transparent",
       alignItems: "center",
       justifyContent: "center",
     },
     headerActionIcon: {
-      fontSize: 14,
+      fontSize: 21,
+      color: BrutalColors.primary,
     },
     pinnedBanner: {
       flexDirection: "row",
@@ -577,69 +826,114 @@ const createStyles = (BrutalColors: BrutalPalette) =>
       paddingHorizontal: 14,
       paddingVertical: 8,
       backgroundColor: BrutalColors.bgCardAlt,
-      borderBottomWidth: 2,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: BrutalColors.border,
     },
     pinnedTag: {
-      borderWidth: 1.5,
+      borderWidth: 1,
       borderColor: BrutalColors.border,
-      borderRadius: 3,
+      borderRadius: 10,
       backgroundColor: BrutalColors.accentYellow,
       paddingHorizontal: 5,
       paddingVertical: 1,
     },
     pinnedTagText: {
-      fontFamily: Fonts?.mono,
-      fontSize: 9,
-      fontWeight: "900",
+      fontFamily: Fonts.semibold,
+      fontSize: 12,
+      fontWeight: "400",
       color: "#1A1A1A",
     },
     pinnedText: {
       flex: 1,
-      fontFamily: Fonts?.sans,
-      fontSize: 11,
-      fontWeight: "600",
+      fontFamily: Fonts.semibold,
+      fontSize: 12,
+      fontWeight: "400",
       color: BrutalColors.inkSecondary,
     },
     messagesList: {
-      padding: 14,
-      gap: 14,
+      flexGrow: 1,
+      padding: 18,
+      gap: 13,
     },
     messageText: {
-      fontFamily: Fonts?.sans,
-      fontSize: 14,
-      lineHeight: 20,
-      fontWeight: "500",
+      fontFamily: Fonts.medium,
+      fontSize: 15,
+      lineHeight: 24,
+      fontWeight: "400",
       color: BrutalColors.ink,
     },
     inputDock: {
       flexDirection: "row",
       alignItems: "center",
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      backgroundColor: BrutalColors.bgCard,
-      borderTopWidth: 3,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      backgroundColor: "transparent",
+      borderTopWidth: 0,
       borderTopColor: BrutalColors.border,
       gap: 8,
     },
     chatInput: {
       flex: 1,
+      fontFamily: Fonts.sans,
+      fontSize: 18,
+      lineHeight: 25,
       paddingVertical: 10,
+      maxHeight: 132,
+      textAlignVertical: "top",
+      backgroundColor: BrutalColors.bgCard,
+      borderColor: BrutalColors.controlBorder,
+      borderRadius: 23,
+      minHeight: 44,
     },
     sendBtn: {
-      width: 44,
-      height: 44,
-      borderWidth: 2.5,
-      borderColor: BrutalColors.border,
-      borderRadius: 4,
-      backgroundColor: BrutalColors.accentYellow,
+      width: 48,
+      height: 48,
+      borderWidth: 0,
+      borderRadius: 24,
+      backgroundColor: BrutalColors.bubbleSent,
       alignItems: "center",
       justifyContent: "center",
     },
     sendBtnText: {
-      fontFamily: Fonts?.mono,
+      fontFamily: Fonts.display,
       fontSize: 20,
-      fontWeight: "900",
-      color: "#1A1A1A",
+      fontWeight: "400",
+      color: "#FFFFFF",
+    },
+    emptyState: {
+      flex: 1,
+      padding: 28,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 14,
+      minHeight: 280,
+    },
+    emptyIcon: {
+      width: 58,
+      height: 58,
+      borderRadius: 19,
+      backgroundColor: BrutalColors.selection,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 8,
+    },
+    emptyIconText: {
+      fontFamily: Fonts.semibold,
+      fontSize: 28,
+      color: BrutalColors.primary,
+    },
+    emptyTitle: {
+      fontFamily: Fonts.sans,
+      fontSize: 25,
+      lineHeight: 34,
+      color: BrutalColors.ink,
+      textAlign: "center",
+    },
+    emptyCopy: {
+      fontFamily: Fonts.sans,
+      fontSize: 15,
+      lineHeight: 24,
+      color: BrutalColors.inkMuted,
+      textAlign: "center",
     },
   });

@@ -35,14 +35,14 @@ export const BrutalCard: React.FC<BrutalCardProps> = ({
             accentColor || (alt ? BrutalColors.bgCardAlt : BrutalColors.bgCard),
           ...Platform.select({
             web: {
-              boxShadow: `${shadowOffset}px ${shadowOffset}px 0px ${BrutalColors.border}`,
+              boxShadow: `0px ${shadowOffset}px ${shadowOffset * 4}px rgba(25, 45, 32, 0.04)`,
             },
             default: {
-              shadowColor: BrutalColors.border,
-              shadowOffset: { width: shadowOffset, height: shadowOffset },
-              shadowOpacity: 1,
-              shadowRadius: 0,
-              elevation: shadowOffset + 1,
+              shadowColor: "#192D20",
+              shadowOffset: { width: 0, height: shadowOffset },
+              shadowOpacity: 0.04,
+              shadowRadius: shadowOffset * 3,
+              elevation: 1,
             },
           }),
         },
@@ -57,9 +57,9 @@ export const BrutalCard: React.FC<BrutalCardProps> = ({
 const createStyles = (BrutalColors: BrutalPalette) =>
   StyleSheet.create({
     card: {
-      borderWidth: 3,
+      borderWidth: 1,
       borderColor: BrutalColors.border,
-      borderRadius: 4,
-      padding: 16,
+      borderRadius: 16,
+      padding: 20,
     },
   });

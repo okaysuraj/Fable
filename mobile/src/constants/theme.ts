@@ -1,48 +1,65 @@
-/** Only the active paper palette and platform font choices live here; dark mode is in the theme provider. */
+/** Instrument Serif branding/conversations and system UI; dark colors live in the provider. */
 import { Platform } from "react-native";
 
 export const BrutalColors = {
-  // Neo-Brutalism Paper Palette
-  bgPaper: "#F5F0E8",
+  bgPaper: "#FFFFFF",
   bgCard: "#FFFFFF",
-  bgCardAlt: "#FFF8E7",
-  bgSidebar: "#FFFDF7",
+  bgCardAlt: "#F2F2F4",
+  bgSidebar: "#F3F3F5",
   bgInput: "#FFFFFF",
 
-  ink: "#1A1A1A",
-  inkSecondary: "#4A4A4A",
-  inkMuted: "#8A8A8A",
-  inkFaint: "#D4CEBF",
+  ink: "#1D1D1F",
+  inkSecondary: "#535358",
+  inkMuted: "#6C6C72",
+  inkFaint: "#909096",
 
-  border: "#1A1A1A",
+  border: "#E1E1E5",
+  controlBorder: "#89898F",
+  primary: "#0067DD",
+  primaryHover: "#0059C1",
+  onPrimary: "#FFFFFF",
+  selection: "#E3EDFC",
+  selectionInk: "#005BC5",
+  bubbleSent: "#0067DD",
+  bubbleReceived: "#E9E9EB",
+  dangerSurface: "#FFF0F3",
+  dangerButton: "#B43E61",
+  codeBg: "#F2F2F4",
 
-  accentYellow: "#FFD700",
-  accentPink: "#FF3366",
-  accentBlue: "#4169E1",
-  accentGreen: "#00C853",
-  accentOrange: "#FF6B35",
-  accentPurple: "#7C3AED",
+  accentYellow: "#E3EDFC",
+  accentPink: "#B43E61",
+  accentBlue: "#0067DD",
+  accentGreen: "#21816E",
+  accentOrange: "#9A5A37",
+  accentPurple: "#0067DD",
 } as const;
 
-export const Fonts = Platform.select({
-  ios: {
-    sans: "System",
-    mono: "Courier",
-    display: "System",
-  },
-  android: {
-    sans: "sans-serif",
-    mono: "monospace",
-    display: "sans-serif-medium",
-  },
-  default: {
-    sans: "System",
-    mono: "monospace",
-    display: "System",
-  },
-  web: {
-    sans: "'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif",
-    mono: "'Space Mono', 'Courier New', monospace",
-    display: "'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif",
-  },
-});
+export const Fonts = {
+  editorial: "InstrumentSerif-Regular",
+  sans: Platform.select({
+    ios: "HelveticaNeue",
+    android: "sans-serif",
+    default: "system-ui",
+  }),
+  medium: Platform.select({
+    ios: "HelveticaNeue-Medium",
+    android: "sans-serif-medium",
+    default: "system-ui",
+  }),
+  semibold: Platform.select({
+    ios: "HelveticaNeue-Medium",
+    android: "sans-serif-medium",
+    default: "system-ui",
+  }),
+  display: Platform.select({
+    ios: "HelveticaNeue-Bold",
+    android: "sans-serif",
+    default: "system-ui",
+  }),
+  mono: Platform.select({
+    ios: "Menlo",
+    android: "monospace",
+    web: "Consolas, monospace",
+    default: "monospace",
+  }),
+};

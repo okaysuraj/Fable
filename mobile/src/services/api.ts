@@ -5,6 +5,9 @@ import type {
   Message,
   User,
   WorkspaceSettings,
+  ConversationPresence,
+  CallSession,
+  MediaAsset,
 } from "@/types/chat";
 import {
   request,
@@ -90,6 +93,67 @@ function directoryQuery(options: DirectoryOptions = {}) {
 }
 
 export const api = {
+  matchContacts: async (numbers: string[], signal?: AbortSignal) => (await request<{ data: User[] }>("/contacts/match", { method: "POST", body: JSON.stringify({ numbers }), signal })).data,
+  contactDirect: async (userId: string) => (await request<{ data: Channel }>("/contacts/direct", { method: "POST", body: JSON.stringify({ userId }) })).data,
+  createGroup: async (name: string, memberIds: string[], clientMutationId: string) => (await request<{ data: Channel }>("/channels/groups", { method: "POST", body: JSON.stringify({ name, memberIds, clientMutationId }) })).data,
+  updateProfilePhoto: async (bytes: ArrayBuffer) => (await request<{ user: User }>("/auth/profile/photo", { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: bytes })).user,
+  removeProfilePhoto: async () => (await request<{ user: User }>("/auth/profile/photo", { method: "DELETE" })).user,
+  uploadMedia: async (channelId: string, name: string, bytes: ArrayBuffer, workspaceId?: string) =>
+    (
+      await request<{ data: MediaAsset }>(
+        `/media/${encodeURIComponent(channelId)}?name=${encodeURIComponent(name)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: bytes,
+        }, "json", workspaceId,
+      )
+    ).data,
+  downloadMedia: (id: string) =>
+    request<Blob>(`/media/${encodeURIComponent(id)}`, {}, "blob"),
+  discardMedia: (id: string) =>
+    request<void>(`/media/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  createDirect: async (userId: string) =>
+    (
+      await request<{ data: Channel }>("/channels/direct", {
+        method: "POST",
+        body: JSON.stringify({ userId }),
+      })
+    ).data,
+  fetchPresence: (id: string) =>
+    request<{ data: ConversationPresence }>(
+      `/channels/${encodeURIComponent(id)}/presence`,
+    ),
+  setTyping: (id: string, typing: boolean) =>
+    request<void>(`/channels/${encodeURIComponent(id)}/typing`, {
+      method: "POST",
+      body: JSON.stringify({ typing }),
+    }),
+  callConfig: () =>
+    request<{
+      data: {
+        iceServers: {
+          urls: string | string[];
+          username?: string;
+          credential?: string;
+        }[];
+      };
+    }>("/calls/config"),
+  incomingCall: () => request<{ data: CallSession | null }>("/calls/incoming"),
+  startCall: (channelId: string, kind: "audio" | "video", offer: string) =>
+    request<{ data: CallSession }>("/calls", {
+      method: "POST",
+      body: JSON.stringify({ channelId, kind, offer }),
+    }),
+  updateCall: (
+    id: string,
+    action: "poll" | "answer" | "end" | "decline",
+    answer?: string,
+  ) =>
+    request<{ data: CallSession }>(`/calls/${encodeURIComponent(id)}`, {
+      method: "POST",
+      body: JSON.stringify({ action, answer }),
+    }),
   ...session,
   selectWorkspace,
   getSelectedWorkspaceId,
@@ -183,11 +247,11 @@ export const api = {
       body: JSON.stringify({ token }),
     }),
   fetchChannelDirectory: (options: DirectoryOptions = {}) =>
-    request<DirectoryPage<Channel>>(`/channels?${directoryQuery(options)}`, {
+    request<DirectoryPage<Channel>>(`/channels?${directoryQuery(options)}&allWorkspaces=true`, {
       signal: options.signal,
     }),
   async fetchChannels(options: DirectoryOptions = {}): Promise<Channel[]> {
-    return (await api.fetchChannelDirectory(options)).data;
+    return (await request<DirectoryPage<Channel>>(`/channels?${directoryQuery(options)}`, { signal: options.signal })).data;
   },
   async fetchChannel(
     id: string,
@@ -357,6 +421,7 @@ export const api = {
   async updateProfile(values: {
     name?: string;
     statusText?: string;
+    phoneNumber?: string | null;
   }): Promise<User> {
     return (
       await request<{ user: User }>("/auth/profile", {
@@ -371,7 +436,10 @@ export const api = {
     options: {
       codeSnippet?: Message["codeSnippet"];
       clientMutationId?: string;
+      replyToId?: string;
+      attachmentIds?: string[];
     } = {},
+    workspaceId?: string,
   ): Promise<Message> {
     return (
       await request<{ data: Message }>("/messages", {
@@ -381,7 +449,7 @@ export const api = {
           content,
           ...options,
         }),
-      })
+      }, "json", workspaceId)
     ).data;
   },
   async toggleReaction(messageId: string, icon: string): Promise<Message> {

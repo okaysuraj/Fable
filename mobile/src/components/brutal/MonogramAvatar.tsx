@@ -12,7 +12,7 @@ import { UserStatus } from "@/types/chat";
 interface MonogramAvatarProps {
   monogram: string;
   size?: number;
-  backgroundColor?: string;
+  backgroundColor?: string | null;
   status?: UserStatus;
   style?: ViewStyle;
 }
@@ -20,12 +20,28 @@ interface MonogramAvatarProps {
 export const MonogramAvatar: React.FC<MonogramAvatarProps> = ({
   monogram,
   size = 38,
-  backgroundColor = "#FFD700",
+  backgroundColor,
   status,
   style,
 }) => {
   const BrutalColors = useBrutalTheme();
   const styles = useBrutalStyles(createStyles);
+  const resolvedBackgroundColor = backgroundColor ?? "#E3EDFC";
+  const hex = resolvedBackgroundColor.replace("#", "");
+  const luminance = /^[\da-f]{6}$/i.test(hex)
+    ? [0, 2, 4]
+        .map((offset) => {
+          const channel = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+          return channel <= 0.04045
+            ? channel / 12.92
+            : ((channel + 0.055) / 1.055) ** 2.4;
+        })
+        .reduce(
+          (sum, channel, index) =>
+            sum + channel * [0.2126, 0.7152, 0.0722][index],
+          0,
+        )
+    : 1;
   const getStatusColor = () => {
     switch (status) {
       case "online":
@@ -48,7 +64,7 @@ export const MonogramAvatar: React.FC<MonogramAvatarProps> = ({
           {
             width: size,
             height: size,
-            backgroundColor,
+            backgroundColor: resolvedBackgroundColor,
           },
         ]}
       >
@@ -57,7 +73,7 @@ export const MonogramAvatar: React.FC<MonogramAvatarProps> = ({
             styles.monogram,
             {
               fontSize: Math.max(10, Math.floor(size * 0.36)),
-              color: backgroundColor === "#1A1A1A" ? "#FFFFFF" : "#1A1A1A",
+              color: luminance < 0.179 ? "#FFFFFF" : "#000000",
             },
           ]}
         >
@@ -85,21 +101,21 @@ export const MonogramAvatar: React.FC<MonogramAvatarProps> = ({
 const createStyles = (BrutalColors: BrutalPalette) =>
   StyleSheet.create({
     container: {
-      borderWidth: 2.5,
+      borderWidth: 0,
       borderColor: BrutalColors.border,
-      borderRadius: 4,
+      borderRadius: 12,
       alignItems: "center",
       justifyContent: "center",
     },
     monogram: {
-      fontFamily: Fonts?.mono,
-      fontWeight: "800",
-      letterSpacing: 0.5,
+      fontFamily: Fonts.semibold,
+      fontWeight: "400",
+      letterSpacing: 0.1,
     },
     statusBadge: {
       position: "absolute",
-      borderWidth: 2,
+      borderWidth: 1,
       borderColor: BrutalColors.border,
-      borderRadius: 2,
+      borderRadius: 10,
     },
   });

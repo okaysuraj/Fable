@@ -83,7 +83,11 @@ export async function mutateMessage(req: AuthRequest, input: MessageMutation) {
         input.codeSnippet === undefined
           ? message.codeSnippet
           : input.codeSnippet;
-      if (!input.content && !code)
+      if (
+        !input.content &&
+        !code &&
+        !(await tx.mediaAsset.count({ where: { messageId: message.id } }))
+      )
         throw new HttpError(400, "Message content is required");
       data = {
         ...data,
@@ -98,6 +102,7 @@ export async function mutateMessage(req: AuthRequest, input: MessageMutation) {
       };
     }
     if (operation === "delete") {
+      await tx.mediaAsset.deleteMany({ where: { messageId: message.id } });
       await tx.reaction.deleteMany({ where: { messageId: message.id } });
       data = {
         ...data,

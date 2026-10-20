@@ -85,6 +85,7 @@ export const publicUserSelect = {
   status: true,
   statusText: true,
   avatarColor: true,
+  photoVersion: true,
   lastSeenAt: true,
 } as const;
 
@@ -98,6 +99,7 @@ export function formatUser(user: {
   statusText: string | null;
   avatarColor: string | null;
   lastSeenAt: Date | null;
+  photoVersion?: number;
 }) {
   const { lastSeenAt, ...profile } = user;
   return {

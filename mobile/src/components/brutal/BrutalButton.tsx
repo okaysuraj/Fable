@@ -1,4 +1,4 @@
-/** Shared native button sizes, palette variants and reduced-motion press feedback. */
+/** Accessible touch controls use semantic colors and quiet press feedback. */
 import {
   useBrutalTheme,
   useBrutalStyles,
@@ -6,7 +6,6 @@ import {
 } from "@/hooks/use-brutal-theme";
 import React from "react";
 import {
-  Pressable,
   Text,
   ViewStyle,
   TextStyle,
@@ -14,11 +13,10 @@ import {
   Platform,
 } from "react-native";
 import { Fonts } from "@/constants/theme";
-import { useReducedMotion } from "react-native-reanimated";
+import { MotionPressable } from "../ui/MotionPressable";
 
 export type BrutalButtonVariant =
   "yellow" | "pink" | "blue" | "green" | "outline" | "dark";
-
 interface BrutalButtonProps {
   title: string;
   accessibilityLabel?: string;
@@ -30,7 +28,6 @@ interface BrutalButtonProps {
   textStyle?: TextStyle;
   icon?: React.ReactNode;
 }
-
 export const BrutalButton: React.FC<BrutalButtonProps> = ({
   title,
   accessibilityLabel,
@@ -42,37 +39,32 @@ export const BrutalButton: React.FC<BrutalButtonProps> = ({
   textStyle,
   icon,
 }) => {
-  const BrutalColors = useBrutalTheme();
+  const colors = useBrutalTheme();
   const styles = useBrutalStyles(createStyles);
-  const reduceMotion = useReducedMotion();
-
-  const backgroundColors = {
-    yellow: BrutalColors.accentYellow,
-    pink: BrutalColors.accentPink,
-    blue: BrutalColors.accentBlue,
-    green: BrutalColors.accentGreen,
-    dark: "#1A1A1A",
+  const backgrounds = {
+    yellow: colors.primary,
+    pink: colors.dangerButton,
+    blue: colors.accentBlue,
+    green: colors.selection,
+    dark: colors.ink,
     outline: "transparent",
   };
-  const textColors = {
-    yellow: "#1A1A1A",
+  const foregrounds = {
+    yellow: colors.onPrimary,
     pink: "#FFFFFF",
-    blue: "#FFFFFF",
-    green: "#1A1A1A",
-    dark: "#FFFFFF",
-    outline: BrutalColors.ink,
+    blue: colors.onPrimary,
+    green: colors.selectionInk,
+    dark: colors.bgCard,
+    outline: colors.inkSecondary,
   };
   const sizes = {
-    sm: { paddingVertical: 8, paddingHorizontal: 12, fontSize: 12 },
-    md: { paddingVertical: 12, paddingHorizontal: 18, fontSize: 13 },
-    lg: { paddingVertical: 16, paddingHorizontal: 24, fontSize: 16 },
+    sm: { paddingVertical: 9, paddingHorizontal: 13, fontSize: 13 },
+    md: { paddingVertical: 12, paddingHorizontal: 18, fontSize: 14 },
+    lg: { paddingVertical: 15, paddingHorizontal: 22, fontSize: 15 },
   };
   const { fontSize, ...padding } = sizes[size];
-
-  const shadowOffset = size === "sm" ? 2 : 4;
-
   return (
-    <Pressable
+    <MotionPressable
       accessibilityLabel={accessibilityLabel || title}
       onPress={onPress}
       accessibilityRole="button"
@@ -82,38 +74,14 @@ export const BrutalButton: React.FC<BrutalButtonProps> = ({
         styles.button,
         padding,
         {
-          backgroundColor: backgroundColors[variant],
-          opacity: disabled ? 0.6 : 1,
-          transform:
-            pressed && !reduceMotion
-              ? [
-                  { translateX: shadowOffset - 1 },
-                  { translateY: shadowOffset - 1 },
-                ]
-              : [{ translateX: 0 }, { translateY: 0 }],
-          ...Platform.select<
-            ViewStyle & { transition?: string; userSelect?: "none" }
-          >({
-            web: {
-              boxShadow: pressed
-                ? "none"
-                : `${shadowOffset}px ${shadowOffset}px 0px ${BrutalColors.border}`,
-              cursor: disabled ? "auto" : "pointer",
-              userSelect: "none",
-              transition: reduceMotion
-                ? "none"
-                : "transform 100ms cubic-bezier(0, 0.95, 0.35, 1)",
-            },
-            default: {
-              shadowColor: BrutalColors.border,
-              shadowOffset: pressed
-                ? { width: 0, height: 0 }
-                : { width: shadowOffset, height: shadowOffset },
-              shadowOpacity: pressed ? 0 : 1,
-              shadowRadius: 0,
-              elevation: pressed ? 0 : shadowOffset + 1,
-            },
-          }),
+          backgroundColor:
+            pressed && variant === "outline"
+              ? colors.bgCardAlt
+              : pressed && variant === "yellow"
+                ? colors.primaryHover
+                : backgrounds[variant],
+          borderColor: variant === "outline" ? colors.border : "transparent",
+          opacity: disabled ? 0.45 : pressed ? 0.85 : 1,
         },
         style,
       ]}
@@ -122,35 +90,30 @@ export const BrutalButton: React.FC<BrutalButtonProps> = ({
       <Text
         style={[
           styles.text,
-          {
-            color: textColors[variant],
-            fontSize: fontSize,
-          },
+          { color: foregrounds[variant], fontSize },
           textStyle,
         ]}
       >
         {title}
       </Text>
-    </Pressable>
+    </MotionPressable>
   );
 };
-
-const createStyles = (BrutalColors: BrutalPalette) =>
+const createStyles = (_colors: BrutalPalette) =>
   StyleSheet.create({
     button: {
-      minHeight: 44,
+      minHeight: Platform.OS === "android" ? 48 : 44,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
       gap: 8,
-      borderWidth: 3,
-      borderColor: BrutalColors.border,
-      borderRadius: 4,
+      borderWidth: 1,
+      borderRadius: 14,
     },
     text: {
-      fontFamily: Fonts?.sans,
-      fontWeight: "800",
-      letterSpacing: 0.6,
-      textTransform: "uppercase",
+      fontFamily: Fonts.semibold,
+      fontWeight: "400",
+      textAlign: "center",
+      lineHeight: 21,
     },
   });

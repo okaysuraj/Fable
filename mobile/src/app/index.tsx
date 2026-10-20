@@ -1,6 +1,6 @@
-/** Restore Firebase identity before showing the native dashboard or authentication screens. */
+/** Restore the configured identity before showing the native dashboard or authentication screens. */
 import { useState, useEffect, useCallback } from "react";
-import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
+import { Text, StyleSheet, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { User } from "@/types/chat";
 import {
@@ -10,17 +10,19 @@ import {
   onSessionExpired,
 } from "@/services/api";
 import { BrutalButton } from "@/components/brutal/BrutalButton";
-import { BrutalColors, Fonts } from "@/constants/theme";
+import { Fonts } from "@/constants/theme";
 import { BrutalCard } from "@/components/brutal/BrutalCard";
-import { LandingView } from "@/components/LandingView";
 import { LoginView } from "@/components/LoginView";
 import { DashboardView } from "@/components/DashboardView";
+import { FableBrand } from "@/components/FableBrand";
+import { useBrutalStyles, useBrutalTheme, type BrutalPalette } from "@/hooks/use-brutal-theme";
+import { ScreenTransition } from "@/components/ui/ScreenTransition";
+import { AppIcon } from "@/components/ui/AppIcon";
 
 export default function App() {
+  const colors = useBrutalTheme();
+  const styles = useBrutalStyles(createStyles);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [authView, setAuthView] = useState<"landing" | "login" | "register">(
-    "landing",
-  );
   const [loading, setLoading] = useState(true);
   const [sessionError, setSessionError] = useState("");
   const [sessionAttempt, setSessionAttempt] = useState(0);
@@ -36,7 +38,6 @@ export default function App() {
           unsubscribe = onSessionExpired(() => {
             if (mounted) {
               setCurrentUser(null);
-              setAuthView("login");
             }
           });
         if (!token) return;
@@ -77,7 +78,6 @@ export default function App() {
       );
     } finally {
       setCurrentUser(null);
-      setAuthView("landing");
     }
   };
 
@@ -85,12 +85,13 @@ export default function App() {
     return (
       <SafeAreaView style={styles.loadingArea}>
         <BrutalCard style={styles.loadingCard}>
+          <AppIcon name="refresh" size={30} />
           <Text accessibilityRole="alert" style={styles.loadingTitle}>
-            CONNECTION REQUIRED
+            Connection required
           </Text>
           <Text style={styles.loadingSubtitle}>{sessionError}</Text>
           <BrutalButton
-            title="TRY AGAIN"
+            title="Try again"
             onPress={() => {
               setLoading(true);
               setSessionError("");
@@ -98,7 +99,7 @@ export default function App() {
             }}
           />
           <BrutalButton
-            title="SIGN OUT"
+            title="Sign out"
             variant="outline"
             onPress={() => {
               void handleLogout();
@@ -113,14 +114,11 @@ export default function App() {
     return (
       <SafeAreaView style={styles.loadingArea}>
         <BrutalCard style={styles.loadingCard}>
-          <View style={styles.logoBadge}>
-            <Text style={styles.logoBadgeText}>F</Text>
-          </View>
-          <Text style={styles.loadingTitle}>LOADING...</Text>
-          <Text style={styles.loadingSubtitle}>CHECKING SESSION</Text>
+          <FableBrand />
+          <Text style={styles.loadingSubtitle}>Opening your chats…</Text>
           <ActivityIndicator
             size="small"
-            color={BrutalColors.ink}
+            color={colors.primary}
             style={{ marginTop: 8 }}
           />
         </BrutalCard>
@@ -130,33 +128,24 @@ export default function App() {
 
   if (currentUser) {
     return (
-      <DashboardView
-        currentUser={currentUser}
-        onLogout={handleLogout}
-        onProfileUpdated={setCurrentUser}
-      />
-    );
-  }
-
-  if (authView === "login" || authView === "register") {
-    return (
-      <LoginView
-        initialMode={authView}
-        onSuccess={handleAuth}
-        onBackToLanding={() => setAuthView("landing")}
-      />
+      <ScreenTransition key={currentUser.id}>
+        <DashboardView
+          currentUser={currentUser}
+          onLogout={handleLogout}
+          onProfileUpdated={setCurrentUser}
+        />
+      </ScreenTransition>
     );
   }
 
   return (
-    <LandingView
-      onLogin={() => setAuthView("login")}
-      onSignUp={() => setAuthView("register")}
-    />
+    <ScreenTransition key="sign-in">
+      <LoginView onSuccess={handleAuth} />
+    </ScreenTransition>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (BrutalColors: BrutalPalette) => StyleSheet.create({
   loadingArea: {
     flex: 1,
     backgroundColor: BrutalColors.bgPaper,
@@ -168,36 +157,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
-  logoBadge: {
-    width: 56,
-    height: 56,
-    backgroundColor: BrutalColors.accentYellow,
-    borderWidth: 3,
-    borderColor: BrutalColors.border,
-    borderRadius: 4,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 8,
-  },
-  logoBadgeText: {
-    fontFamily: Fonts?.sans,
-    fontWeight: "900",
-    fontSize: 32,
-    color: BrutalColors.ink,
-  },
   loadingTitle: {
-    fontFamily: Fonts?.sans,
-    fontWeight: "900",
+    fontFamily: Fonts.semibold,
+    fontWeight: "400",
     fontSize: 18,
-    letterSpacing: 0.5,
+    letterSpacing: 0.1,
     color: BrutalColors.ink,
   },
   loadingSubtitle: {
-    fontFamily: Fonts?.mono,
-    fontSize: 11,
-    fontWeight: "800",
+    fontFamily: Fonts.semibold,
+    fontSize: 12,
+    fontWeight: "400",
     color: BrutalColors.inkMuted,
-    letterSpacing: 1,
-    textTransform: "uppercase",
+    letterSpacing: 0.1,
+    textTransform: "none",
   },
 });

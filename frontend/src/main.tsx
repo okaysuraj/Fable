@@ -1,4 +1,4 @@
-/** Mount the browser application with routing and a top-level render recovery boundary. */
+/** The browser hosts Fable's public mobile-download landing page. */
 import React from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";

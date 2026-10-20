@@ -102,7 +102,7 @@ export function WorkspaceManagerModal({
           setError(
             failure instanceof Error
               ? failure.message
-              : "Unable to load workspaces.",
+              : "Unable to load groups.",
           );
       })
       .finally(() => {
@@ -139,7 +139,7 @@ export function WorkspaceManagerModal({
   const sections = useMemo(
     () => [
       {
-        title: "YOUR WORKSPACES",
+        title: "Your groups",
         kind: "workspaces",
         data: (workspaces.page?.data || []).map((workspace): Row => ({
           kind: "workspace",
@@ -147,7 +147,7 @@ export function WorkspaceManagerModal({
         })),
       },
       {
-        title: "WORKSPACE MEMBERS",
+        title: "Group members",
         kind: "members",
         data: (members.page?.data || []).map((member): Row => ({
           kind: "member",
@@ -157,7 +157,7 @@ export function WorkspaceManagerModal({
       ...(canManage
         ? [
             {
-              title: "INVITATIONS",
+              title: "Invitations",
               kind: "invitations",
               data: (invitations.page?.data || []).map((entry): Row => ({
                 kind: "invitation",
@@ -169,7 +169,7 @@ export function WorkspaceManagerModal({
       ...(canManage
         ? [
             {
-              title: "WORKSPACE ACTIVITY",
+              title: "Group activity",
               kind: "audit",
               data: (activity.page?.data || []).map((event): Row => ({
                 kind: "audit",
@@ -200,7 +200,7 @@ export function WorkspaceManagerModal({
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <View style={styles.header}>
-            <Text style={styles.title}>WORKSPACE</Text>
+            <Text style={styles.title}>Group</Text>
             <BrutalButton
               title="Close"
               size="sm"
@@ -263,14 +263,14 @@ export function WorkspaceManagerModal({
                     {canManage && (
                       <>
                         <BrutalInput
-                          accessibilityLabel="Workspace name"
+                          accessibilityLabel="Group name"
                           maxLength={80}
                           editable={!busy}
                           value={workspaceName}
                           onChangeText={setWorkspaceName}
                         />
                         <BrutalButton
-                          title="Rename workspace"
+                          title="Rename group"
                           variant="outline"
                           disabled={
                             busy ||
@@ -293,14 +293,14 @@ export function WorkspaceManagerModal({
                     )}
                     {selected.role !== "owner" ? (
                       <BrutalButton
-                        title="Leave workspace"
+                        title="Leave group"
                         variant="outline"
                         disabled={busy}
                         onPress={() =>
                           setConfirmation({
-                            title: "Leave workspace?",
+                            title: "Leave group?",
                             description:
-                              "You will lose access to its channels and messages. You will need a new invitation to return.",
+                              "You will lose access to its chats and messages. You will need a new invitation to return.",
                             action: async () => {
                               await api.leaveWorkspace(selected.id);
                               await api.selectWorkspace(null);
@@ -330,11 +330,11 @@ export function WorkspaceManagerModal({
                       : invitations;
               const label =
                 section.kind === "workspaces"
-                  ? "Search workspaces"
+                  ? "Search groups"
                   : section.kind === "members"
-                    ? "Search workspace members"
+                    ? "Search group members"
                     : section.kind === "audit"
-                      ? "Workspace activity"
+                      ? "Group activity"
                       : "Search invitations";
               return (
                 <View>
@@ -385,8 +385,8 @@ export function WorkspaceManagerModal({
                     <BrutalButton
                       title={
                         item.workspace.id === selected?.id
-                          ? "Current workspace"
-                          : "Switch workspace"
+                          ? "Current group"
+                          : "Switch group"
                       }
                       variant="outline"
                       disabled={busy || item.workspace.id === selected?.id}
@@ -455,8 +455,8 @@ export function WorkspaceManagerModal({
                               title: "Change member role?",
                               description:
                                 role === "admin"
-                                  ? "This member will lose workspace administration privileges."
-                                  : "This member will gain workspace administration privileges.",
+                                  ? "This member will lose group administration privileges."
+                                  : "This member will gain group administration privileges.",
                               action: async () => {
                                 await api.updateWorkspaceMember(
                                   selected.id,
@@ -475,7 +475,7 @@ export function WorkspaceManagerModal({
                           disabled={busy}
                           onPress={() =>
                             setConfirmation({
-                              title: "Transfer workspace ownership?",
+                              title: "Transfer group ownership?",
                               description: `${member.name} will become the owner. You will become an administrator.`,
                               action: async () => {
                                 const saved =
@@ -499,14 +499,14 @@ export function WorkspaceManagerModal({
                     (selected.role === "owner" ||
                       (selected.role === "admin" && role === "member")) && (
                       <BrutalButton
-                        title="Remove from workspace"
+                        title="Remove from group"
                         size="sm"
                         variant="outline"
                         disabled={busy}
                         onPress={() =>
                           setConfirmation({
-                            title: "Remove workspace member?",
-                            description: `${member.name} will lose access to all workspace channels and messages.`,
+                            title: "Remove group member?",
+                            description: `${member.name} will lose access to all group chats and messages.`,
                             action: async () => {
                               await api.removeWorkspaceMember(
                                 selected.id,
@@ -524,17 +524,17 @@ export function WorkspaceManagerModal({
             }}
             ListFooterComponent={
               <View style={styles.stack}>
-                <Text style={styles.heading}>CREATE A WORKSPACE</Text>
+                <Text style={styles.heading}>Create a group</Text>
                 <BrutalInput
-                  accessibilityLabel="New workspace name"
-                  placeholder="Workspace name"
+                  accessibilityLabel="New group name"
+                  placeholder="Group name"
                   maxLength={80}
                   editable={!busy}
                   value={newWorkspaceName}
                   onChangeText={setNewWorkspaceName}
                 />
                 <BrutalButton
-                  title="Create workspace"
+                  title="Create group"
                   disabled={busy || !newWorkspaceName.trim()}
                   onPress={() => {
                     void perform(async () => {
@@ -547,10 +547,10 @@ export function WorkspaceManagerModal({
                 />
                 {selected && (
                   <>
-                    <Text style={styles.heading}>CREATE A TEXT CHANNEL</Text>
+                    <Text style={styles.heading}>Create a text chat</Text>
                     <BrutalInput
-                      accessibilityLabel="Channel name"
-                      placeholder="Channel name"
+                      accessibilityLabel="Chat name"
+                      placeholder="Chat name"
                       autoCapitalize="none"
                       autoCorrect={false}
                       maxLength={80}
@@ -559,7 +559,7 @@ export function WorkspaceManagerModal({
                       onChangeText={setName}
                     />
                     <BrutalInput
-                      accessibilityLabel="Channel topic"
+                      accessibilityLabel="Chat topic"
                       placeholder="Topic (optional)"
                       maxLength={500}
                       editable={!busy}
@@ -567,16 +567,16 @@ export function WorkspaceManagerModal({
                       onChangeText={setTopic}
                     />
                     <View style={styles.row}>
-                      <Text style={styles.label}>Private channel</Text>
+                      <Text style={styles.label}>Private chat</Text>
                       <Switch
-                        accessibilityLabel="Private channel"
+                        accessibilityLabel="Private chat"
                         disabled={busy}
                         value={isPrivate}
                         onValueChange={setIsPrivate}
                       />
                     </View>
                     <BrutalButton
-                      title="Create channel"
+                      title="New chat"
                       disabled={busy || !name.trim()}
                       onPress={() => {
                         void perform(async () => {
@@ -595,7 +595,7 @@ export function WorkspaceManagerModal({
                 )}
                 {canManage && (
                   <>
-                    <Text style={styles.heading}>INVITE A TEAMMATE</Text>
+                    <Text style={styles.heading}>Invite a teammate</Text>
                     <BrutalInput
                       accessibilityLabel="Invitation email"
                       placeholder="Teammate email"
@@ -635,7 +635,7 @@ export function WorkspaceManagerModal({
                           onPress={() => {
                             void perform(async () => {
                               await Share.share({
-                                message: `Join my Fable workspace. Sign in with ${invitation.email}, open Workspace, then paste this invitation token: ${invitation.token}`,
+                                message: `Join my Fable group. Sign in with ${invitation.email}, open Group, then paste this invitation token: ${invitation.token}`,
                               });
                             });
                           }}
@@ -644,7 +644,7 @@ export function WorkspaceManagerModal({
                     )}
                   </>
                 )}
-                <Text style={styles.heading}>JOIN A WORKSPACE</Text>
+                <Text style={styles.heading}>Join a group</Text>
                 <BrutalInput
                   accessibilityLabel="Invitation token"
                   placeholder="Paste invitation token"
@@ -656,7 +656,7 @@ export function WorkspaceManagerModal({
                   onChangeText={setToken}
                 />
                 <BrutalButton
-                  title="Join workspace"
+                  title="Join group"
                   disabled={busy || !token.trim()}
                   onPress={() => {
                     void perform(async () => {
@@ -680,30 +680,30 @@ const createStyles = (BrutalColors: BrutalPalette) =>
     container: { flex: 1, backgroundColor: BrutalColors.bgPaper },
     header: {
       padding: 16,
-      borderBottomWidth: 3,
+      borderBottomWidth: 1,
       borderColor: BrutalColors.border,
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
     },
     title: {
-      fontFamily: Fonts.sans,
-      fontWeight: "900",
+      fontFamily: Fonts.display,
+      fontWeight: "400",
       fontSize: 22,
       color: BrutalColors.ink,
     },
     body: { padding: 20, gap: 16 },
     stack: { gap: 16 },
     heading: {
-      fontFamily: Fonts.sans,
-      fontWeight: "900",
+      fontFamily: Fonts.semibold,
+      fontWeight: "400",
       fontSize: 16,
       marginTop: 16,
       color: BrutalColors.ink,
     },
     label: {
-      fontFamily: Fonts.sans,
-      fontWeight: "700",
+      fontFamily: Fonts.semibold,
+      fontWeight: "400",
       fontSize: 14,
       color: BrutalColors.ink,
     },
@@ -715,7 +715,7 @@ const createStyles = (BrutalColors: BrutalPalette) =>
     },
     workspace: {
       padding: 14,
-      borderWidth: 2,
+      borderWidth: 1,
       borderColor: BrutalColors.border,
       gap: 12,
       backgroundColor: BrutalColors.bgCard,
@@ -727,5 +727,9 @@ const createStyles = (BrutalColors: BrutalPalette) =>
       gap: 12,
     },
     token: { fontFamily: Fonts.mono, fontSize: 13, color: BrutalColors.ink },
-    error: { padding: 14, backgroundColor: "#FFE0E9", color: "#1A1A1A" },
+    error: {
+      padding: 14,
+      backgroundColor: BrutalColors.dangerSurface,
+      color: BrutalColors.accentPink,
+    },
   });

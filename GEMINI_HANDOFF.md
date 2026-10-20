@@ -1,6 +1,56 @@
 # Fable implementation handoff for Gemini
 
-Updated: 19 October 2026. Read this file with `ARCHITECTURE.md` and the Fable overrides at the top of `AGENTS.md`.
+Updated: 20 October 2026. Read this file with `ARCHITECTURE.md` and the Fable overrides at the top of `AGENTS.md`.
+
+## Mobile right navigation drawer — latest request, 20 October 2026
+
+The follow-up refinement narrows navigation to about 74% of phone width, normally 240–288 logical points, leaving at least 72 points visible; tablets cap at 288. The user referenced ChatGPT/Gemini's push-aside motion. `DashboardView` now owns `navigationProgress` (1 closed / 0 open) and the common width. `NavigationSwipeArea` translates and rounds the main surface; `NavigationDrawer` uses the same value for its position, drag and lighter 12% scrim. The modal renders outside the translated content and starts a 300 ms ease-out entrance on `onShow`; closing takes up to 220 ms, adjusted to remaining distance. Interrupted drag dismissal starts from the current position. Preserve reduced motion, all close routes and post-dismissal actions. These dimensions are a design choice; no retention improvement is claimed.
+
+The user explicitly limited this navigation change to mobile. Leave the web app as it is. `NavigationDrawer.tsx` provides the right-side modal drawer, shared hamburger control and right-edge opening gesture using the existing Gesture Handler/Reanimated/Worklets modules. The root layout now supplies `GestureHandlerRootView`; the modal has its own gesture root for Android. `SidebarDrawer.tsx` remains the virtualized conversation/people list, with its old three-dot inline menu and profile/group footer removed. `DashboardView.tsx` owns the list mode and independent navigation visibility. The conversation header also opens navigation; message search/details are in its conversation section, while audio/video call buttons remain inline.
+
+Navigation dismisses through swipe right, backdrop, close, Android Back or accessibility escape. Actions wait for the closing animation; reduced motion skips it. Read advancement pauses while the drawer is open. The existing avatar null fallback remains. No web source, dependencies, schema, identity behavior, test files or CI were changed for this request. See DESIGN.md for the native acceptance walkthrough and PRODUCTION_AUDIT.md for executed checks.
+
+## Messenger expansion — latest request, 20 October 2026
+
+The user requested full iMessage-style design/interactions/features and chose a local-first calling/media setup. The new feature coverage and remaining work are in `FEATURE_PARITY.md`; do not describe full parity as finished. Implemented source now includes private direct pairs, quoted replies, typing leases, explicit read receipts, richer emoji input/reactions, protected PostgreSQL binary attachments, WAV/M4A voice recording and foreground one-to-one WebRTC audio/video. Recent chat order/previews use real messages. Keep Firebase production identity and the explicitly enabled local development identity.
+
+The four new migrations are applied to the local `fable_development` schema after a backup in the system temporary directory. The database volume/public legacy schema were preserved. Media limits are four attachments/message, 10 MiB/file and 100 MiB/uploading account. Uploads reconcile uncertain retries using a scoped content digest, bind transactionally with a confirmed send, and deletion removes media bytes. Native downloads stream to cache with cancellation/deadlines and a conversation retains one open preview. The browser AudioWorklet emits bounded real PCM WAV recordings for portable playback. Do not restore the prior disabled-media placeholders in text conversations.
+
+Calls use authenticated PostgreSQL-backed SDP signaling and actual browser/native WebRTC. Default `WEBRTC_ICE_SERVERS=[]` supports local peers; cross-network reliability needs operator-owned STUN/TURN. Native calls need a rebuilt binary and stop on backgrounding. No push credentials, native call integration or paid service was introduced. Expo Doctor flags `react-native-webrtc` as untested on New Architecture; this warning remains visible and physical-device acceptance is outstanding. No native toolchain/device is available here.
+
+System fonts inside messaging now supersede the earlier conversation-serif direction. Brand/landing serif assets remain. New call/media modules are under each client's `components/calling` and `components/chat`; backend routers are `calls.ts`, `media.ts`, `conversationPresence.ts`. Builds are verification of source/bundles, not proof of working two-person media. Browser debugging was blocked by automatic policy review; screenshot inspection and live API reads were available. Preserve the user's no-test-files/no-CI preference.
+
+## Shared Instrument Serif typography - 20 October 2026
+
+The latest user request extends the landing footer's Instrument Serif into all wordmarks and the chat interface on web/native. Preserve this update over older system-font-only descriptions below. Shared brand components use the regular serif face. Chat list headings/names, conversation titles, authors, messages, composer, message search results, pins and editing use the same face at readable sizes; main conversation text is 18px. Small controls/metadata and code keep their respective system/monospace fonts.
+
+Web font declaration/preload moved to global CSS/index.html so direct app/login entry loads it. Native includes the identical licensed font under `mobile/assets/fonts/instrument-serif` and loads it through the already-installed Expo Font module before releasing the splash screen. Compact edge-to-edge layout, themes, real data, authentication and backend contracts remain unchanged. See DESIGN.md and the latest PRODUCTION_AUDIT.md entry for verification and remaining manual font-rendering checks.
+
+## Public landing redesign - 20 October 2026
+
+The latest request rebuilds the public web landing with an editorial paper/forest/cobalt/lime palette, whole Instrument Serif display headings, original SVG conversation artwork, a functioning three-tab feature tour, FAQ and real signup/login/app links. Preview it at `/welcome`, which stays available during session loading or API errors. Anonymous `/` also shows it; signed-in `/` still opens the app. Landing code/CSS is lazy-loaded and scoped. The local font's license and pinned source are included with the asset; the signed-in app and native keep system fonts.
+
+Preserve the everyday messenger direction below. No backend/native behavior, database, dependency or authentication policy changed for this landing task. Tour imagery is labeled as product illustration; no invented users, messages, testimonials or unsupported features were added. Web production build, repository source formatting, whitespace and live asset-serving checks passed. Browser/device visual and interaction review remains manual after the environment blocked automation. See DESIGN.md and the latest PRODUCTION_AUDIT.md entry for scope and evidence.
+
+## Everyday messenger UI update - 20 October 2026
+
+The latest web refinement removes all outer app margins, maximum width and rounded window framing. Preserve the compact 60px headers, 64px chat rows, smaller avatars/gutters and full-width phone list/conversation. `useAppViewport` adapts the shell/dialog height to the visible browser viewport while allowing pinch zoom; safe areas and touch-size controls remain. Web reactions now live in the existing message-options dialog. Native layout and backend contracts were not changed by this web-specific refinement.
+
+The user's messenger request supersedes the earlier screenshot: use a polished Apple Messages-inspired interface with one chat list and one wide conversation. The signed-in app's separate account navigation rail, gradient backgrounds, purple bubbles, custom fonts and hashtag decoration have been removed. System fonts, gray received bubbles, blue outgoing bubbles and neutral surfaces apply across web/native. See DESIGN.md for current tokens and layout; do not restore the earlier three-column treatment.
+
+Visible language now uses chats, people and groups. API/type/database names and membership authorization remain unchanged. Secondary account/group actions live in an options menu. Both clients have focused, real New chat creation forms. Web and native tablet use two columns; phones switch between list and conversation. Native Android back returns to chats, and details remains an overlay. Local Firebase-free development remains enabled as previously requested.
+
+Real room topics/member counts provide list previews. Direct messaging and reply threads remain future features; no fictional contacts, messages, statuses or delivery checks were added. No database reset, migration, dependency change, test file or CI workflow was introduced for this design change. Current evidence and the browser/device verification boundary are in PRODUCTION_AUDIT.md.
+
+## Development authentication update - 20 October 2026
+
+The user requested local testing without Firebase. Development now supports an explicit API identity with real PostgreSQL account/workspace provisioning. Web and mobile automatically open that account without Firebase configuration, passwords or verification. Normal local logout still clears client state; the login view offers **Continue in development**. Device-wide Firebase revocation is hidden and rejected in this mode.
+
+Enable `DEV_AUTH_ENABLED=true` in `backend/.env`, `VITE_DEV_AUTH_ENABLED=true` in `frontend/.env` and `EXPO_PUBLIC_DEV_AUTH_ENABLED=true` in `mobile/.env`; restart the running processes. These flags have been enabled in the ignored local environment files and examples. Defaults are `developer@fable.local` / `Local developer`. Optional API `DEV_AUTH_EMAIL` changes the account; clients on the same API share it. Development never links an existing Firebase/legacy account or changes its memberships. All workspace/private-room permissions still apply.
+
+The API refuses the bypass unless `NODE_ENV=development` and rejects its public marker when disabled. Production web builds and Expo release bundles always use Firebase. Set all three flags to `false` to restore Firebase locally, and disable the API flag before production startup. Use only a trusted local network. See ARCHITECTURE.md section 5 for the lifecycle and current verification in PRODUCTION_AUDIT.md.
+
+Local database inspection found the legacy six-table `public` schema without migration history. Its records were retained untouched. Both ignored API database URLs now select `schema=fable_development`, and the eight existing migrations were deployed to that separate schema in the same local `fable` database. No database, volume or legacy record was reset, relinked or deleted. New environment examples use this schema too. A future legacy data migration remains a deliberate separate operation.
 
 ## 1. Instructions to the next coding agent
 
@@ -9,9 +59,9 @@ You are continuing an existing hobby collaboration app, not generating a new sta
 The user explicitly requested:
 
 - Keep this project's working **Express + TypeScript + Prisma** backend. The FastAPI specification in the reusable `AGENTS.md` template does not describe Fable's current backend and is not a requested migration.
-- Keep React 19 web, Expo SDK 57 mobile, PostgreSQL and Firebase Email/Password authentication.
+- Keep React 19 web, Expo SDK 57 mobile, PostgreSQL and Firebase Email/Password authentication for production. Preserve the explicitly enabled local development identity described above.
 - Run PostgreSQL in Docker only. Start the API, Vite frontend and Expo client manually with npm. Keep one `docker-compose.yml`; do not restore application Dockerfiles, production Compose or Nginx without a new request. Neon is a possible future target.
-- Require clicking the Firebase email verification link before application login/access; support password reset by received email link.
+- In Firebase mode, require clicking the Firebase email verification link before application login/access; support password reset by received email link.
 - Show only real authorized backend/database data. Never revive demo users, fake messages, synthetic calls, fabricated counts or offline-success fallbacks.
 - Maintain equivalent content, permissions and capabilities on web/mobile, with native layouts and bounded mobile memory.
 - Do not create GitHub workflows, test files, fixture generators or automated test harnesses. Use builds, strict type checks, lint, schema validation and documented manual verification.
@@ -26,26 +76,26 @@ Prioritize the current local workflow and one requested feature slice at a time.
 
 The following has source implementation on both clients and the actual API. Current compilation is a separate evidence category from live environment verification.
 
-| Feature | Implemented behavior |
-| --- | --- |
-| Authentication | Real Firebase signup, mail verification, resend, password reset, verified login, session restore and local logout. |
-| Session provisioning | Atomic real profile/personal workspace/general room creation; UID binding and idempotent concurrent provisioning. |
-| Profile | Persisted name/status, appropriate public DTOs and retained-author refresh. |
-| Workspaces | Paginated discovery/search/switch, create, rename, join and recovery after all memberships are revoked. |
-| Workspace roles | Owner-only promote/demote, protected removal, protected self-leave and owner transfer. |
-| Invitations | Email-bound, expiring, single-use hashed tokens; manual copy/native sharing; paginated status list and revocation. |
-| Rooms | Paginated directories, real creation, private roster/candidates, add/remove/self-leave, name/topic editing, creator transfer and typed-name deletion. |
-| Text/code messaging | Actual persisted records, stable chronological pagination, retained drafts and scoped client mutation IDs for uncertain retries. |
-| Message history | Earlier/Newer/Latest and exact centered search-result navigation with bounded retained pages. |
-| Reactions/pins | Six real reaction summaries, independent pin pages and versioned mutations. |
-| Editing/deletion | Author edits, authorized deletion, expected-version conflicts, content-purged tombstones and preserved unsaved drafts. |
-| Search | Server PostgreSQL full-text search across all authorized live text/code history, workspace/room scope and bounded pages. |
-| Read/unread | Monotonic timestamp/ID watermarks; archive/search browsing does not clear unseen future content. |
-| Synchronization | Bounded foreground polling and durable message changes for off-window edits/deletes/reactions. |
-| Administration activity | Real paginated owner/admin audit history on web/mobile. |
-| Appearance | Real account-backed light/dark themes applied to web/native tokens and refreshed while active. |
-| Account-wide logout | Explicit confirmation before server-side revocation of all-device refresh tokens. |
-| Local runtime/release boundaries | Docker PostgreSQL only, manual API/web/Expo commands, production-origin/TLS guards, explicit migrations and EAS profiles. |
+| Feature                          | Implemented behavior                                                                                                                                  |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Authentication                   | Real Firebase signup, mail verification, resend, password reset, verified login, session restore and local logout.                                    |
+| Session provisioning             | Atomic real profile/personal workspace/general room creation; UID binding and idempotent concurrent provisioning.                                     |
+| Profile                          | Persisted name/status, appropriate public DTOs and retained-author refresh.                                                                           |
+| Workspaces                       | Paginated discovery/search/switch, create, rename, join and recovery after all memberships are revoked.                                               |
+| Workspace roles                  | Owner-only promote/demote, protected removal, protected self-leave and owner transfer.                                                                |
+| Invitations                      | Email-bound, expiring, single-use hashed tokens; manual copy/native sharing; paginated status list and revocation.                                    |
+| Rooms                            | Paginated directories, real creation, private roster/candidates, add/remove/self-leave, name/topic editing, creator transfer and typed-name deletion. |
+| Text/code messaging              | Actual persisted records, stable chronological pagination, retained drafts and scoped client mutation IDs for uncertain retries.                      |
+| Message history                  | Earlier/Newer/Latest and exact centered search-result navigation with bounded retained pages.                                                         |
+| Reactions/pins                   | Six real reaction summaries, independent pin pages and versioned mutations.                                                                           |
+| Editing/deletion                 | Author edits, authorized deletion, expected-version conflicts, content-purged tombstones and preserved unsaved drafts.                                |
+| Search                           | Server PostgreSQL full-text search across all authorized live text/code history, workspace/room scope and bounded pages.                              |
+| Read/unread                      | Monotonic timestamp/ID watermarks; archive/search browsing does not clear unseen future content.                                                      |
+| Synchronization                  | Bounded foreground polling and durable message changes for off-window edits/deletes/reactions.                                                        |
+| Administration activity          | Real paginated owner/admin audit history on web/mobile.                                                                                               |
+| Appearance                       | Real account-backed light/dark themes applied to web/native tokens and refreshed while active.                                                        |
+| Account-wide logout              | Explicit confirmation before server-side revocation of all-device refresh tokens.                                                                     |
+| Local runtime/release boundaries | Docker PostgreSQL only, manual API/web/Expo commands, production-origin/TLS guards, explicit migrations and EAS profiles.                             |
 
 Disconnected calling buttons, pretend microphone/device/volume controls and unused call screens were removed. Dormant media schema fields do not mean attachments or voice/video work. Do not reintroduce those controls until the relevant implementation is complete.
 
@@ -332,21 +382,21 @@ Use one region, one API replica and small bounded pools initially. Avoid unneces
 
 These are potential additions, not current requirements or implemented features:
 
-| Improvement | Implementation direction |
-| --- | --- |
-| Structured mentions and saved messages | Validated user/resource relations, paginated personal saved collection, no fake local counts. |
-| Rich text/code composer | Safe structured content schema and sanitizer; preserve plaintext/accessibility/export fallback. |
-| Notification controls | Real per-room mute/read preferences used by delivery, not decorative toggles. |
-| Better public routes/deep links | Stable workspace/room/message links with authorization and missing-resource recovery on both clients. |
-| Draft persistence/offline reading | Scoped limited encrypted/private caches, expiry/deletion policy and clear cached/pending indicators. |
-| System theme | Add a stored `system` mode and device/browser preference listener with clear precedence; migrate the current two-value schema intentionally. |
-| Locale/timezone preferences | Shared formatting rules, translatable strings and DST-safe timestamps; never change server chronological order. |
-| Accessible keyboard shortcuts | Discoverable web shortcuts, focus-safe behavior and equivalent native actions. |
-| Channel archive/bookmarks | Explicit lifecycle/personal bookmark relations, discoverability, retention and bounded lists. |
-| Scheduled messages | Durable due-time jobs, idempotent send, author/current-room permission recheck and visible scheduled state. |
-| Integrations/webhooks | Per-workspace scoped credentials, signed delivery, retries, rotation and abuse limits. |
-| Optional AI summaries | Explicit opt-in, authorized bounded context, privacy/provider decision, costs and clear generated attribution. Never send private workspace data to a model by default. |
-| Billing/paid tiers | Only if product needs it: provider-verified webhooks, entitlements, exact amounts and safe retry/reconciliation. |
+| Improvement                            | Implementation direction                                                                                                                                                |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Structured mentions and saved messages | Validated user/resource relations, paginated personal saved collection, no fake local counts.                                                                           |
+| Rich text/code composer                | Safe structured content schema and sanitizer; preserve plaintext/accessibility/export fallback.                                                                         |
+| Notification controls                  | Real per-room mute/read preferences used by delivery, not decorative toggles.                                                                                           |
+| Better public routes/deep links        | Stable workspace/room/message links with authorization and missing-resource recovery on both clients.                                                                   |
+| Draft persistence/offline reading      | Scoped limited encrypted/private caches, expiry/deletion policy and clear cached/pending indicators.                                                                    |
+| System theme                           | Add a stored `system` mode and device/browser preference listener with clear precedence; migrate the current two-value schema intentionally.                            |
+| Locale/timezone preferences            | Shared formatting rules, translatable strings and DST-safe timestamps; never change server chronological order.                                                         |
+| Accessible keyboard shortcuts          | Discoverable web shortcuts, focus-safe behavior and equivalent native actions.                                                                                          |
+| Channel archive/bookmarks              | Explicit lifecycle/personal bookmark relations, discoverability, retention and bounded lists.                                                                           |
+| Scheduled messages                     | Durable due-time jobs, idempotent send, author/current-room permission recheck and visible scheduled state.                                                             |
+| Integrations/webhooks                  | Per-workspace scoped credentials, signed delivery, retries, rotation and abuse limits.                                                                                  |
+| Optional AI summaries                  | Explicit opt-in, authorized bounded context, privacy/provider decision, costs and clear generated attribution. Never send private workspace data to a model by default. |
+| Billing/paid tiers                     | Only if product needs it: provider-verified webhooks, entitlements, exact amounts and safe retry/reconciliation.                                                        |
 
 Discuss scope before adding expensive/external features. None of these should displace security, data integrity, accessibility or core usability.
 
@@ -391,18 +441,18 @@ Dependency audits are read-only release information, not automatic downgrade ins
 
 Record each row as passed on a named environment/device, failed with evidence, or unverified. The table itself does not claim execution.
 
-| Journey | Manual checks |
-| --- | --- |
-| Signup/login/reset | Received mail, pre-verification denial, expired links, verified session, reset/new password, disabled/revoked identity. |
-| Workspace discovery/recovery | Later pages/search, saved selection, revoked selection, zero memberships, create/join without tenant access. |
-| Roles/removal | Owner/admin/member permissions, owner transfer, channel creator safeguards, last-workspace self-leave, removal revokes actual data access. |
-| Invitations | Real token sharing, intended email, duplicate pending invite, expiry, revoke-vs-accept, no secret in listing/logs. |
-| Private room | True roster/candidates, unauthorized admin denied, add/remove/leave, creator transfer, typed deletion, foreign IDs rejected. |
-| Messages | Cross-platform create/read/edit/delete/reactions/pins, failed draft retained, duplicate uncertain send, stale version conflict. |
-| History/search | Beyond cached windows, before/after ties, exact older match, independent pins, removed cursor rows, lexical search/private isolation. |
-| Synchronization/read | Remote archive edits/deletes, membership revocation, multiple devices, unread remains until actually viewed, foreground/resume. |
-| Profile/theme/activity | Real persisted changes on both clients, off-page authors, theme contrast, owner/admin audit only and bounded pages. |
-| Accessibility/native | Keyboard/focus/back, VoiceOver/TalkBack, scaling, safe areas, long text, reduced motion, secure session lifecycle. |
-| Release | Correct secrets/domains/TLS, final containers, migrations/restore, signed install, dependency review, monitoring and device performance. |
+| Journey                      | Manual checks                                                                                                                              |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Signup/login/reset           | Received mail, pre-verification denial, expired links, verified session, reset/new password, disabled/revoked identity.                    |
+| Workspace discovery/recovery | Later pages/search, saved selection, revoked selection, zero memberships, create/join without tenant access.                               |
+| Roles/removal                | Owner/admin/member permissions, owner transfer, channel creator safeguards, last-workspace self-leave, removal revokes actual data access. |
+| Invitations                  | Real token sharing, intended email, duplicate pending invite, expiry, revoke-vs-accept, no secret in listing/logs.                         |
+| Private room                 | True roster/candidates, unauthorized admin denied, add/remove/leave, creator transfer, typed deletion, foreign IDs rejected.               |
+| Messages                     | Cross-platform create/read/edit/delete/reactions/pins, failed draft retained, duplicate uncertain send, stale version conflict.            |
+| History/search               | Beyond cached windows, before/after ties, exact older match, independent pins, removed cursor rows, lexical search/private isolation.      |
+| Synchronization/read         | Remote archive edits/deletes, membership revocation, multiple devices, unread remains until actually viewed, foreground/resume.            |
+| Profile/theme/activity       | Real persisted changes on both clients, off-page authors, theme contrast, owner/admin audit only and bounded pages.                        |
+| Accessibility/native         | Keyboard/focus/back, VoiceOver/TalkBack, scaling, safe areas, long text, reduced motion, secure session lifecycle.                         |
+| Release                      | Correct secrets/domains/TLS, final containers, migrations/restore, signed install, dependency review, monitoring and device performance.   |
 
 Finish the current release matrix before calling the deployed text application production ready. Treat future feature proposals separately from release blockers. When reporting progress, state which code was implemented, which environment actually verified it and which work remains.

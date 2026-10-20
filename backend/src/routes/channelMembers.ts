@@ -22,7 +22,11 @@ function memberData(
   user: Parameters<typeof formatUser>[0],
   role: string,
   joinedAt: Date,
-  channel: { createdById: string | null; isPrivate: boolean },
+  channel: {
+    createdById: string | null;
+    isPrivate: boolean;
+    directKey: string | null;
+  },
   req: AuthRequest,
 ) {
   return {
@@ -31,6 +35,7 @@ function memberData(
     workspaceRole: role,
     joinedAt: joinedAt.toISOString(),
     canRemove:
+      !channel.directKey &&
       channel.isPrivate &&
       channel.createdById !== user.id &&
       (canManageChannel(channel, req) || user.id === req.auth!.userId),
@@ -124,7 +129,8 @@ channelMembersRouter.get(
                 req,
               ),
             ),
-            canManageMembers: canManageChannel(channel, req),
+            canManageMembers:
+              !channel.directKey && canManageChannel(channel, req),
           };
         }
         const scope: Prisma.WorkspaceMemberWhereInput = {
@@ -274,6 +280,8 @@ channelMembersRouter.post(
         where: { id: req.params.id, ...channelScope(req) },
       });
       if (!channel) throw new HttpError(404, "Channel not found");
+      if (channel.directKey)
+        throw new HttpError(403, "Direct conversation membership is fixed");
       if (!channel.isPrivate)
         throw new HttpError(
           400,
@@ -341,6 +349,8 @@ channelMembersRouter.delete(
         where: { id: req.params.id, ...channelScope(req) },
       });
       if (!channel) throw new HttpError(404, "Channel not found");
+      if (channel.directKey)
+        throw new HttpError(403, "Direct conversation membership is fixed");
       if (!channel.isPrivate)
         throw new HttpError(
           400,

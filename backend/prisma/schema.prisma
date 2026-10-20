@@ -25,6 +25,10 @@ model User {
   status          String            @default("offline")
   statusText      String?
   avatarColor     String?
+  phoneNumber     String?           @db.VarChar(16)
+  photoBytes      Bytes?
+  photoMimeType   String?
+  photoVersion    Int               @default(0)
   lastSeenAt      DateTime?         @db.Timestamptz(3)
   account         Account?
   messages        Message[]
@@ -70,16 +74,21 @@ model Channel {
   topic       String          @default("")
   type        String          @default("text")
   isPrivate   Boolean         @default(false)
+  directKey   String?         @unique
+  lastMessageAt DateTime      @default(now()) @db.Timestamptz(3)
   createdById String?
   createdBy   User?           @relation("ChannelCreator", fields: [createdById], references: [id], onDelete: SetNull)
   members     ChannelMember[]
   messages    Message[]
   changes     MessageChange[]
+  calls       Call[]
+  assets      MediaAsset[]
   createdAt   DateTime        @default(now()) @db.Timestamptz(3)
   updatedAt   DateTime        @updatedAt @db.Timestamptz(3)
 
   @@unique([workspaceId, name])
   @@index([workspaceId, createdAt, id])
+  @@index([workspaceId, lastMessageAt, id])
 }
 
 model ChannelMember {
@@ -89,6 +98,7 @@ model ChannelMember {
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   lastReadAt        DateTime @default(now()) @db.Timestamptz(3)
   lastReadMessageId String?
+  typingUntil       DateTime? @db.Timestamptz(3)
   createdAt         DateTime @default(now()) @db.Timestamptz(3)
 
   @@id([channelId, userId])
@@ -103,6 +113,10 @@ model Message {
   senderId    String
   sender      User            @relation(fields: [senderId], references: [id], onDelete: Restrict)
   content     String
+  replyToId   String?
+  replyTo     Message?        @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies     Message[]       @relation("MessageReplies")
+  assets      MediaAsset[]
   clientMutationId   String?
   clientMutationHash String?
   codeSnippet Json?
@@ -119,8 +133,52 @@ model Message {
 
   @@index([channelId, createdAt, id])
   @@index([senderId])
+  @@index([replyToId])
   @@index([channelId, isPinned, createdAt, id])
   @@unique([channelId, senderId, clientMutationId])
+}
+
+// Signaling is short-lived and participant-scoped; media never passes through PostgreSQL.
+model Call {
+  id          String   @id @default(cuid())
+  channelId   String
+  channel     Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  callerId    String
+  calleeId    String
+  kind        String
+  status      String   @default("ringing")
+  offer       String?
+  answer      String?
+  callerSeenAt DateTime @default(now()) @db.Timestamptz(3)
+  calleeSeenAt DateTime? @db.Timestamptz(3)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+  expiresAt   DateTime @db.Timestamptz(3)
+
+  @@index([channelId, createdAt, id])
+  @@index([calleeId, status, expiresAt])
+  @@index([callerId, status, expiresAt])
+}
+
+// Bounded local-first media storage. Bytes stay behind the same membership checks as text.
+model MediaAsset {
+  id        String   @id @default(cuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  ownerId   String
+  messageId String?
+  message   Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  name      String
+  mimeType  String
+  size      Int
+  digest    String?
+  bytes     Bytes
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([channelId, ownerId])
+  @@index([messageId])
+  @@index([ownerId, createdAt])
+  @@index([ownerId, channelId, digest])
 }
 
 model MessageChange {

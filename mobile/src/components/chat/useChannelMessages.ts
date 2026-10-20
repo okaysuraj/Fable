@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { AppState } from "react-native";
 import type { Channel, Message, User, WorkspaceSettings } from "@/types/chat";
 import { api, ApiError, type MessagePage } from "@/services/api";
@@ -16,6 +22,7 @@ import {
 } from "./messageState";
 
 interface Options {
+  conversationVisible: boolean;
   setNotice: (message: string) => void;
   onAccessLost: () => void;
   onMetadataLoaded: (
@@ -27,10 +34,16 @@ interface Options {
 
 /** Native room state: bounded snapshots, durable changes, read progress and confirmed mutations. */
 export function useChannelMessages({
+  conversationVisible,
   setNotice,
   onAccessLost,
   onMetadataLoaded,
 }: Options) {
+  // Keep the draft mounted behind the phone list without acknowledging unseen messages.
+  const conversationVisibleRef = useRef(conversationVisible);
+  useLayoutEffect(() => {
+    conversationVisibleRef.current = conversationVisible;
+  }, [conversationVisible]);
   const callbacks = useRef({ onAccessLost, onMetadataLoaded });
   useEffect(() => {
     callbacks.current = { onAccessLost, onMetadataLoaded };
@@ -60,6 +73,8 @@ export function useChannelMessages({
   const pendingSend = useRef<{
     channelId: string;
     content: string;
+    replyToId?: string;
+    attachmentKey?: string;
     key: string;
   } | null>(null);
   const selectedChannel = useRef("");
@@ -254,6 +269,7 @@ export function useChannelMessages({
         }
         const newestLoaded = readCandidate.current;
         if (
+          conversationVisibleRef.current &&
           !archived.current &&
           !showingPins.current &&
           newestLoaded &&
@@ -481,20 +497,30 @@ export function useChannelMessages({
     );
   }, []);
 
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = async (
+    content: string,
+    replyToId?: string,
+    attachmentIds?: string[],
+  ) => {
     const channelId = selectedChannel.current;
     if (
       !pendingSend.current ||
       pendingSend.current.channelId !== channelId ||
-      pendingSend.current.content !== content
+      pendingSend.current.content !== content ||
+      pendingSend.current.replyToId !== replyToId ||
+      pendingSend.current.attachmentKey !== JSON.stringify(attachmentIds || [])
     )
       pendingSend.current = {
         channelId,
         content,
+        replyToId,
+        attachmentKey: JSON.stringify(attachmentIds || []),
         key: `mobile_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`,
       };
     const saved = await api.sendMessage(channelId, content, {
       clientMutationId: pendingSend.current.key,
+      replyToId,
+      attachmentIds,
     });
     pendingSend.current = null;
     applyConfirmedMessage(saved);

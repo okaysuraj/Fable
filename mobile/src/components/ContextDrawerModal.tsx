@@ -1,4 +1,5 @@
 /** Room information, private membership changes and room administration stay in one native modal. */
+import { AppIcon } from "./ui/AppIcon";
 import {
   useBrutalTheme,
   useBrutalStyles,
@@ -92,7 +93,7 @@ export const ContextDrawerModal: React.FC<ContextDrawerModalProps> = ({
       setError(
         failure instanceof Error
           ? failure.message
-          : "The channel change could not be saved.",
+          : "The chat change could not be saved.",
       );
     } finally {
       inFlight.current = false;
@@ -132,7 +133,7 @@ export const ContextDrawerModal: React.FC<ContextDrawerModalProps> = ({
   const sections = useMemo(
     () => [
       {
-        title: "Room members",
+        title: "Chat members",
         kind: "members",
         data: (roster.page?.data || []).map((member): MemberRow => ({
           kind: "member",
@@ -142,7 +143,7 @@ export const ContextDrawerModal: React.FC<ContextDrawerModalProps> = ({
       ...(channel.isPrivate && canManage
         ? [
             {
-              title: "Add workspace member",
+              title: "Add group member",
               kind: "candidates",
               data: (candidates.page?.data || []).map((member): MemberRow => ({
                 kind: "available",
@@ -167,18 +168,18 @@ export const ContextDrawerModal: React.FC<ContextDrawerModalProps> = ({
         <SafeAreaView style={[styles.modalContainer, { height: "85%" }]}>
           <View style={styles.header}>
             <View>
-              <Text style={styles.headerTitle}>ROOM MEMBERS</Text>
-              <Text style={styles.channelName}>#{channel.name}</Text>
+              <Text style={styles.headerTitle}>Chat members</Text>
+              <Text style={styles.channelName}>{channel.name}</Text>
             </View>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Close channel details"
+              accessibilityLabel="Close chat details"
               hitSlop={8}
               disabled={busy}
               onPress={onClose}
               style={styles.closeBtn}
             >
-              <Text style={styles.closeBtnText}>✕</Text>
+              <AppIcon name="close" size={24} />
             </Pressable>
           </View>
           <SectionList<MemberRow>
@@ -193,20 +194,20 @@ export const ContextDrawerModal: React.FC<ContextDrawerModalProps> = ({
             ListHeaderComponent={
               <View style={{ gap: 16 }}>
                 <BrutalCard style={styles.sectionCard}>
-                  <Text style={styles.sectionHeading}>TOPIC & OBJECTIVE</Text>
+                  <Text style={styles.sectionHeading}>Topic & objective</Text>
                   <Text style={styles.topicText}>
                     {channel.topic || "No topic set."}
                   </Text>
                   <Text style={styles.topicText}>
-                    {channel.isPrivate ? "Private channel" : "Public channel"} ·{" "}
-                    {channel.memberCount} room members
+                    {channel.isPrivate ? "Private chat" : "Public chat"} ·{" "}
+                    {channel.memberCount} chat members
                   </Text>
                 </BrutalCard>
                 {channel.canManageChannel && (
                   <BrutalCard style={styles.sectionCard}>
-                    <Text style={styles.sectionHeading}>CHANNEL SETTINGS</Text>
+                    <Text style={styles.sectionHeading}>Chat settings</Text>
                     <BrutalInput
-                      accessibilityLabel="Channel name"
+                      accessibilityLabel="Chat name"
                       value={name}
                       onChangeText={setName}
                       editable={!busy}
@@ -215,14 +216,14 @@ export const ContextDrawerModal: React.FC<ContextDrawerModalProps> = ({
                       autoCorrect={false}
                     />
                     <BrutalInput
-                      accessibilityLabel="Channel topic"
+                      accessibilityLabel="Chat topic"
                       value={topic}
                       onChangeText={setTopic}
                       editable={!busy}
                       maxLength={500}
                     />
                     <BrutalButton
-                      title="Save channel details"
+                      title="Save chat details"
                       disabled={
                         busy ||
                         !name.trim() ||
@@ -240,11 +241,11 @@ export const ContextDrawerModal: React.FC<ContextDrawerModalProps> = ({
                       }}
                     />
                     <Text style={styles.topicText}>
-                      Delete this channel and its messages permanently. Enter
-                      its name to confirm.
+                      Delete this chat and its messages permanently. Enter its
+                      name to confirm.
                     </Text>
                     <BrutalInput
-                      accessibilityLabel="Channel name to confirm deletion"
+                      accessibilityLabel="Chat name to confirm deletion"
                       placeholder={channel.name}
                       value={confirmName}
                       onChangeText={setConfirmName}
@@ -254,13 +255,13 @@ export const ContextDrawerModal: React.FC<ContextDrawerModalProps> = ({
                       autoCorrect={false}
                     />
                     <BrutalButton
-                      title="Delete channel"
+                      title="Delete chat"
                       variant="outline"
                       disabled={busy || confirmName !== channel.name}
                       onPress={() =>
                         setConfirmation({
-                          title: "Permanently delete channel?",
-                          description: `All messages, pins and reactions in #${channel.name} will be deleted. This cannot be undone.`,
+                          title: "Permanently delete chat?",
+                          description: `All messages, pins and reactions in ${channel.name} will be deleted. This cannot be undone.`,
                           action: async () => {
                             await api.deleteChannel(channel.id, confirmName);
                             await onMembershipChanged(true);
@@ -314,13 +315,13 @@ export const ContextDrawerModal: React.FC<ContextDrawerModalProps> = ({
                     <Text style={styles.memberName}>{removeTarget.name}</Text>
                     <Text accessibilityRole="alert" style={styles.topicText}>
                       {removeTarget.id === currentUser.id
-                        ? "Leave this private room? You will lose access to its messages."
-                        : "Remove this member from the private room?"}
+                        ? "Leave this private chat? You will lose access to its messages."
+                        : "Remove this member from the private chat?"}
                     </Text>
                     <BrutalButton
                       title={
                         removeTarget.id === currentUser.id
-                          ? "Leave room"
+                          ? "Leave chat"
                           : "Remove member"
                       }
                       variant="pink"
@@ -352,7 +353,7 @@ export const ContextDrawerModal: React.FC<ContextDrawerModalProps> = ({
                     label={
                       section.kind === "members"
                         ? "Search members"
-                        : "Search workspace members"
+                        : "Search group members"
                     }
                     query={directory.query}
                     onSearch={directory.search}
@@ -402,7 +403,7 @@ export const ContextDrawerModal: React.FC<ContextDrawerModalProps> = ({
                   <BrutalButton
                     title={
                       item.member.id === currentUser.id
-                        ? "Leave room"
+                        ? "Leave chat"
                         : "Remove member"
                     }
                     size="sm"
@@ -415,14 +416,14 @@ export const ContextDrawerModal: React.FC<ContextDrawerModalProps> = ({
                   channel.canManageChannel &&
                   item.member.id !== channel.createdById && (
                     <BrutalButton
-                      title="Transfer channel ownership"
+                      title="Transfer chat ownership"
                       size="sm"
                       variant="outline"
                       disabled={busy || loading}
                       onPress={() =>
                         setConfirmation({
-                          title: "Transfer channel ownership?",
-                          description: `${item.member.name} will become the channel owner. Workspace administrator permissions still apply.`,
+                          title: "Transfer chat ownership?",
+                          description: `${item.member.name} will become the chat owner. Group administrator permissions still apply.`,
                           action: async () => {
                             await api.transferChannelOwnership(
                               channel.id,
@@ -453,10 +454,10 @@ const createStyles = (BrutalColors: BrutalPalette) =>
     modalContainer: {
       maxHeight: "85%",
       backgroundColor: BrutalColors.bgPaper,
-      borderTopWidth: 4,
+      borderTopWidth: 1,
       borderTopColor: BrutalColors.border,
-      borderLeftWidth: 3,
-      borderRightWidth: 3,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
       borderColor: BrutalColors.border,
       borderTopLeftRadius: 12,
       borderTopRightRadius: 12,
@@ -467,29 +468,29 @@ const createStyles = (BrutalColors: BrutalPalette) =>
       justifyContent: "space-between",
       paddingHorizontal: 18,
       paddingVertical: 14,
-      borderBottomWidth: 3,
+      borderBottomWidth: 1,
       borderBottomColor: BrutalColors.border,
       backgroundColor: BrutalColors.bgCard,
     },
     headerTitle: {
-      fontFamily: Fonts?.sans,
-      fontWeight: "900",
+      fontFamily: Fonts.semibold,
+      fontWeight: "400",
       fontSize: 16,
       color: BrutalColors.ink,
-      letterSpacing: 0.5,
+      letterSpacing: 0.1,
     },
     channelName: {
-      fontFamily: Fonts?.mono,
+      fontFamily: Fonts.semibold,
       fontSize: 12,
-      fontWeight: "700",
+      fontWeight: "400",
       color: BrutalColors.inkMuted,
     },
     closeBtn: {
       width: 34,
       height: 34,
-      borderWidth: 2,
+      borderWidth: 1,
       borderColor: BrutalColors.border,
-      borderRadius: 4,
+      borderRadius: 10,
       backgroundColor: BrutalColors.bgCardAlt,
       alignItems: "center",
       justifyContent: "center",
@@ -508,17 +509,17 @@ const createStyles = (BrutalColors: BrutalPalette) =>
       gap: 6,
     },
     sectionHeading: {
-      fontFamily: Fonts?.sans,
-      fontWeight: "900",
+      fontFamily: Fonts.semibold,
+      fontWeight: "400",
       fontSize: 12,
-      letterSpacing: 0.6,
+      letterSpacing: 0.1,
       color: BrutalColors.inkSecondary,
     },
     topicText: {
-      fontFamily: Fonts?.sans,
+      fontFamily: Fonts.semibold,
       fontSize: 14,
       lineHeight: 20,
-      fontWeight: "600",
+      fontWeight: "400",
       color: BrutalColors.ink,
     },
     memberRow: {
@@ -526,24 +527,24 @@ const createStyles = (BrutalColors: BrutalPalette) =>
       alignItems: "center",
       gap: 12,
       backgroundColor: BrutalColors.bgCard,
-      borderWidth: 2,
+      borderWidth: 1,
       borderColor: BrutalColors.border,
-      borderRadius: 4,
+      borderRadius: 10,
       padding: 10,
     },
     memberTextCol: {
       flex: 1,
     },
     memberName: {
-      fontFamily: Fonts?.sans,
-      fontWeight: "800",
+      fontFamily: Fonts.semibold,
+      fontWeight: "400",
       fontSize: 13,
       color: BrutalColors.ink,
     },
     memberRole: {
-      fontFamily: Fonts?.sans,
-      fontSize: 11,
-      fontWeight: "500",
+      fontFamily: Fonts.medium,
+      fontSize: 12,
+      fontWeight: "400",
       color: BrutalColors.inkMuted,
     },
   });

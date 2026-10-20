@@ -1,535 +1,345 @@
-/** Virtualized room/member pages keep native navigation bounded as the workspace grows. */
+/** The virtualized chat/people list; account navigation lives in the right drawer. */
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  useBrutalTheme,
-  useBrutalStyles,
-  type BrutalPalette,
-} from "@/hooks/use-brutal-theme";
-import React, { useCallback, useMemo } from "react";
-import { Pressable, SectionList, StyleSheet, Text, View } from "react-native";
+  AppState,
+  ActivityIndicator,
+  FlatList,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Fonts } from "@/constants/theme";
+import { useBrutalStyles, useBrutalTheme, type BrutalPalette } from "@/hooks/use-brutal-theme";
 import { Channel, User } from "@/types/chat";
-import { MonogramAvatar } from "./brutal/MonogramAvatar";
 import { api } from "@/services/api";
+import { MonogramAvatar } from "./brutal/MonogramAvatar";
 import { useDirectory } from "./useDirectory";
 import { DirectoryControls } from "./DirectoryControls";
+import { SearchField } from "./ui/SearchField";
+import { NavigationMenuButton } from "./NavigationDrawer";
+import { AppIcon } from "./ui/AppIcon";
+import { MotionPressable as Pressable } from "./ui/MotionPressable";
 
-interface SidebarDrawerProps {
+interface Props {
+  currentUserId: string;
   activeChannelId: string;
-  onSelectChannel: (channelId: string) => void;
-  currentUser: User;
-  onOpenSettings: () => void;
-  onOpenSearch: () => void;
-  onLogout: () => void;
-  onClose: () => void;
-  onOpenWorkspace?: () => void;
-  onOpenProfile: () => void;
+  onSelectChannel: (id: string, workspaceId?: string) => void;
+  showPeople: boolean;
+  onOpenNavigation: () => void;
+  onCreateChat: () => void;
+  canCreateChat: boolean;
+  onOpenCamera: () => void;
+  cameraBusy: boolean;
 }
-
-type Row =
-  { kind: "channel"; channel: Channel } | { kind: "member"; member: User };
+type Row = { kind: "chat"; chat: Channel } | { kind: "person"; person: User };
 const keyExtractor = (row: Row) =>
-  row.kind === "channel"
-    ? `channel:${row.channel.id}`
-    : `member:${row.member.id}`;
-export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
+  row.kind === "chat" ? row.chat.id : row.person.id;
+export function SidebarDrawer({
+  currentUserId,
   activeChannelId,
   onSelectChannel,
-  currentUser,
-  onOpenSettings,
-  onOpenSearch,
-  onLogout,
-  onClose,
-  onOpenWorkspace,
-  onOpenProfile,
-}) => {
-  const BrutalColors = useBrutalTheme();
+  showPeople,
+  onOpenNavigation,
+  onCreateChat,
+  canCreateChat,
+  onOpenCamera,
+  cameraBusy,
+}: Props) {
   const styles = useBrutalStyles(createStyles);
-  const rooms = useDirectory(api.fetchChannelDirectory);
-  const people = useDirectory(api.fetchTeamDirectory);
-  const sections = useMemo(
-    () => [
-      {
-        title: "ROOMS & CHANNELS",
-        kind: "rooms",
-        data: (rooms.page?.data || []).map((channel): Row => ({
-          kind: "channel",
-          channel,
-        })),
-      },
-      {
-        title: "STUDIO TEAM",
-        kind: "people",
-        data: (people.page?.data || []).map((member): Row => ({
-          kind: "member",
-          member,
-        })),
-      },
-    ],
-    [rooms.page, people.page],
+  const colors = useBrutalTheme();
+  const [pendingPerson, setPendingPerson] = useState("");
+  const [personError, setPersonError] = useState("");
+  const inFlight = useRef(false);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  const openPerson = useCallback(
+    async (personId: string) => {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      setPendingPerson(personId);
+      setPersonError("");
+      try {
+        const channel = await api.createDirect(personId);
+        if (alive.current) onSelectChannel(channel.id);
+      } catch (failure) {
+        if (alive.current)
+          setPersonError(
+            failure instanceof Error
+              ? failure.message
+              : "Couldn't open this chat. Try again.",
+          );
+      } finally {
+        inFlight.current = false;
+        if (alive.current) setPendingPerson("");
+      }
+    },
+    [onSelectChannel],
   );
+  const rooms = useDirectory(api.fetchChannelDirectory, !showPeople);
+  const people = useDirectory(api.fetchTeamDirectory, showPeople);
+  const directory = showPeople ? people : rooms;
+  const reloadRooms = rooms.reload;
+  const reloadPeople = people.reload;
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (AppState.currentState !== "active") return;
+      if (showPeople) reloadPeople();
+      else reloadRooms();
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [reloadRooms, reloadPeople, showPeople]);
+  const data: Row[] = showPeople
+    ? (people.page?.data || []).map((person) => ({ kind: "person", person }))
+    : (rooms.page?.data || []).map((chat) => ({ kind: "chat", chat }));
   const renderItem = useCallback(
     ({ item }: { item: Row }) => {
-      if (item.kind === "member")
-        return (
-          <View style={styles.memberItem}>
+      if (item.kind === "person") {
+        const isSelf = item.person.id === currentUserId;
+        const content = (
+          <>
             <MonogramAvatar
-              monogram={item.member.monogram}
-              status={item.member.status}
-              size={32}
-              backgroundColor={
-                item.member.avatarColor || BrutalColors.accentYellow
-              }
+              monogram={item.person.monogram}
+              size={46}
+              backgroundColor={item.person.avatarColor}
             />
-            <View style={styles.memberInfo}>
-              <Text style={styles.memberName} numberOfLines={1}>
-                {item.member.name}
+            <View style={styles.rowBody}>
+              <Text style={styles.name} numberOfLines={1}>
+                {item.person.name}
               </Text>
-              <Text style={styles.memberRole} numberOfLines={1}>
-                {item.member.statusText || item.member.role}
+              <Text style={styles.preview} numberOfLines={2}>
+                {pendingPerson === item.person.id
+                  ? "Opening chat…"
+                  : isSelf
+                    ? "You"
+                    : item.person.statusText || `@${item.person.handle}`}
               </Text>
             </View>
-          </View>
+            {pendingPerson === item.person.id ? (
+              <ActivityIndicator />
+            ) : (
+              !isSelf && <AppIcon name="forward" color={colors.inkFaint} size={18} />
+            )}
+          </>
         );
-      const channel = item.channel;
-      const selected = channel.id === activeChannelId;
+        return isSelf ? (
+          <View style={styles.row}>{content}</View>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Message ${item.person.name}`}
+            disabled={Boolean(pendingPerson)}
+            onPress={() => {
+              void openPerson(item.person.id);
+            }}
+            style={({ pressed }) => [styles.row, pressed && styles.selectedRow]}
+          >
+            {content}
+          </Pressable>
+        );
+      }
+      const chat = item.chat;
+      const selected = chat.id === activeChannelId;
       return (
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ selected }}
-          accessibilityLabel={`${channel.name}${channel.isPrivate ? ", private" : ""}${channel.type !== "text" ? ", calls unavailable" : ""}`}
+          accessibilityLabel={`${chat.name}${chat.isPrivate ? ", private chat" : ""}${chat.unreadCount ? `, ${chat.unreadCount} unread` : ""}`}
+          style={[styles.row, selected && styles.selectedRow]}
           onPress={() => {
-            onSelectChannel(channel.id);
-            onClose();
+            onSelectChannel(chat.id, chat.workspaceId);
           }}
-          style={[
-            styles.channelItem,
-            selected && styles.channelItemActive,
-            { minHeight: 48 },
-          ]}
         >
-          <View
-            style={[
-              styles.channelIconBox,
-              {
-                backgroundColor:
-                  channel.type === "audio"
-                    ? BrutalColors.accentPink
-                    : channel.type === "video"
-                      ? BrutalColors.accentBlue
-                      : BrutalColors.accentYellow,
-              },
-            ]}
-          >
-            <Text style={styles.channelIconText}>
-              {channel.isPrivate
-                ? "●"
-                : channel.type === "text"
-                  ? "#"
-                  : channel.type === "audio"
-                    ? "◉"
-                    : "▶"}
+          <MonogramAvatar
+            monogram={chat.name.slice(0, 2).toUpperCase()}
+            size={46}
+            backgroundColor="#DCE5EF"
+          />
+          <View style={styles.rowBody}>
+            <Text style={styles.name} numberOfLines={1}>
+              {chat.name}
+            </Text>
+            <Text style={styles.preview} numberOfLines={2}>
+              {chat.lastMessage?.text ||
+                chat.topic ||
+                `${chat.memberCount} ${chat.memberCount === 1 ? "person" : "people"}${chat.isPrivate ? " · Private chat" : " · Group chat"}`}
             </Text>
           </View>
-          <Text
-            style={[styles.channelName, selected && styles.channelNameActive]}
-            numberOfLines={1}
-          >
-            {channel.name}
-          </Text>
-          {channel.type !== "text" ? (
-            <View style={styles.statusTag}>
-              <Text style={styles.statusTagText}>UNAVAILABLE</Text>
+          {!!chat.unreadCount && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{chat.unreadCount}</Text>
             </View>
-          ) : (channel.unreadCount ?? 0) > 0 ? (
-            <View style={styles.unreadBadge}>
-              <Text style={styles.unreadText}>{channel.unreadCount}</Text>
-            </View>
-          ) : null}
+          )}
         </Pressable>
       );
     },
-    [activeChannelId, onSelectChannel, onClose, BrutalColors, styles],
+    [
+      activeChannelId,
+      currentUserId,
+      onSelectChannel,
+      openPerson,
+      pendingPerson,
+      colors.inkFaint,
+      styles,
+    ],
   );
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.brandingHeader}>
-        <View style={styles.brandingLeft}>
-          <View style={styles.brandBadge}>
-            <Text style={styles.brandBadgeText}>F</Text>
-          </View>
-          <View>
-            <Text style={styles.brandTitle}>FABLE</Text>
-            <Text style={styles.brandSubtitle}>YOUR WORKSPACE</Text>
-          </View>
-        </View>
-        <View style={styles.brandingRight}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Search workspace"
-            hitSlop={8}
-            onPress={onOpenSearch}
-            style={styles.iconBtn}
-          >
-            <Text style={styles.iconBtnText}>⌕</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Close workspace menu"
-            hitSlop={8}
-            onPress={onClose}
-            style={styles.iconBtn}
-          >
-            <Text style={styles.iconBtnText}>✕</Text>
-          </Pressable>
-        </View>
+    <SafeAreaView style={styles.container} edges={["left", "right"]}>
+      <View style={styles.header}>
+        <Text accessibilityRole="header" style={styles.heading}>
+          {showPeople ? "People" : "Chats"}
+        </Text>
+        {!showPeople && <Pressable accessibilityRole="button" accessibilityLabel="Take a photo to send" accessibilityState={{ busy: cameraBusy }} disabled={cameraBusy} onPress={onOpenCamera} style={styles.iconButton}>{cameraBusy ? <ActivityIndicator color={colors.primary} /> : <AppIcon name="camera" size={26} />}</Pressable>}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="New chat"
+          disabled={!canCreateChat}
+          onPress={onCreateChat}
+          style={[styles.iconButton, !canCreateChat && { opacity: 0.4 }]}
+        >
+          <AppIcon name="compose" size={26} />
+        </Pressable>
+        <NavigationMenuButton onPress={onOpenNavigation} />
       </View>
-      <SectionList<Row>
-        sections={sections}
+      <View style={styles.search}>
+        <SearchField
+          accessibilityLabel={showPeople ? "Search people" : "Search chats"}
+          placeholder={showPeople ? "Search people" : "Search chats"}
+          value={directory.query}
+          onChangeText={directory.search}
+          autoCapitalize="none"
+          autoCorrect={false}
+          maxLength={120}
+          style={styles.searchInput}
+        />
+      </View>
+      {showPeople && personError ? (
+        <Text accessibilityRole="alert" style={styles.personError}>
+          {personError}
+        </Text>
+      ) : null}
+      <FlatList<Row>
+        data={data}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
-        stickySectionHeadersEnabled={false}
         initialNumToRender={16}
         maxToRenderPerBatch={10}
         windowSize={5}
-        contentContainerStyle={styles.scrollList}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.list}
         ListHeaderComponent={
-          <View>
-            {onOpenWorkspace && (
-              <Pressable
-                accessibilityRole="button"
-                onPress={onOpenWorkspace}
-                style={styles.searchBar}
-              >
-                <Text style={styles.searchBarText}>
-                  WORKSPACES, CHANNELS & INVITATIONS
-                </Text>
-              </Pressable>
-            )}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Search channels and members"
-              onPress={onOpenSearch}
-              style={styles.searchBar}
-            >
-              <Text style={styles.searchBarText}>SEARCH CHANNELS & TEAM</Text>
-            </Pressable>
-          </View>
-        }
-        renderSectionHeader={({ section }) => {
-          const directory = section.kind === "rooms" ? rooms : people;
-          return (
-            <View>
-              <Text style={[styles.sectionTitle, { marginTop: 20 }]}>
-                {section.title}
-              </Text>
-              <DirectoryControls
-                label={
-                  section.kind === "rooms" ? "Search rooms" : "Search members"
-                }
-                query={directory.query}
-                onSearch={directory.search}
-                total={directory.page?.total}
-                loading={directory.loading}
-                error={directory.error}
-                onRetry={directory.reload}
-                canPrevious={directory.canPrevious}
-                hasMore={Boolean(directory.page?.hasMore)}
-                onPrevious={directory.previous}
-                onNext={directory.next}
-                onFirst={directory.first}
-                isFirst={directory.isFirst}
-              />
-            </View>
-          );
-        }}
-      />
-      <View style={styles.userFooter}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Edit profile"
-          onPress={onOpenProfile}
-          style={styles.userMeta}
-        >
-          <MonogramAvatar
-            monogram={currentUser.monogram}
-            size={36}
-            backgroundColor={
-              currentUser.avatarColor || BrutalColors.accentYellow
-            }
-            status={currentUser.status}
+          <DirectoryControls
+            label={showPeople ? "Search people" : "Search chats"}
+            query={directory.query}
+            onSearch={directory.search}
+            total={directory.page?.total}
+            loading={directory.loading}
+            error={directory.error}
+            onRetry={directory.reload}
+            canPrevious={directory.canPrevious}
+            hasMore={Boolean(directory.page?.hasMore)}
+            onPrevious={directory.previous}
+            onNext={directory.next}
+            onFirst={directory.first}
+            isFirst={directory.isFirst}
+            showSearch={false}
           />
-          <View style={styles.userTextCol}>
-            <Text style={styles.userName} numberOfLines={1}>
-              {currentUser.name}
+        }
+        ListEmptyComponent={
+          !directory.loading && !directory.error ? (
+            <Text style={styles.empty}>
+              {showPeople
+                ? "No people match your search."
+                : "No conversations yet. Start one with the new chat button."}
             </Text>
-            <Text style={styles.userHandle} numberOfLines={1}>
-              {currentUser.handle}
-            </Text>
-          </View>
-        </Pressable>
-        <View style={styles.footerActions}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open preferences"
-            hitSlop={6}
-            onPress={onOpenSettings}
-            style={styles.controlBtn}
-          >
-            <Text style={styles.controlIcon}>⚙</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Log out"
-            hitSlop={6}
-            onPress={onLogout}
-            style={[styles.controlBtn, { backgroundColor: "#FFE0E9" }]}
-          >
-            <Text style={styles.controlIcon}>⇥</Text>
-          </Pressable>
-        </View>
-      </View>
+          ) : null
+        }
+      />
     </SafeAreaView>
   );
-};
-
-const createStyles = (BrutalColors: BrutalPalette) =>
+}
+const createStyles = (colors: BrutalPalette) =>
   StyleSheet.create({
-    container: {
+    container: { flex: 1, backgroundColor: colors.bgSidebar },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingTop: 16,
+      paddingBottom: 12,
+      paddingLeft: 22,
+      paddingRight: 12,
+    },
+    heading: {
       flex: 1,
-      backgroundColor: BrutalColors.bgSidebar,
-      borderRightWidth: 3,
-      borderRightColor: BrutalColors.border,
+      fontFamily: Fonts.sans,
+      fontSize: 29,
+      fontWeight: "400",
+      letterSpacing: -0.8,
+      color: colors.ink,
     },
-    brandingHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      paddingHorizontal: 16,
-      paddingVertical: 14,
-      borderBottomWidth: 3,
-      borderBottomColor: BrutalColors.border,
-      backgroundColor: BrutalColors.bgCard,
-    },
-    brandingLeft: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-    },
-    brandBadge: {
-      width: 36,
-      height: 36,
-      backgroundColor: BrutalColors.accentYellow,
-      borderWidth: 2.5,
-      borderColor: BrutalColors.border,
-      borderRadius: 4,
+    iconButton: {
+      minWidth: 48,
+      minHeight: 48,
       alignItems: "center",
       justifyContent: "center",
     },
-    brandBadgeText: {
-      fontFamily: Fonts?.sans,
-      fontWeight: "900",
-      fontSize: 20,
-      color: "#1A1A1A",
+    search: { paddingHorizontal: 18, paddingBottom: 4 },
+    searchInput: {
+      backgroundColor: colors.bgCardAlt,
+      borderColor: colors.border,
+      borderRadius: 11,
+      minHeight: 44,
     },
-    brandTitle: {
-      fontFamily: Fonts?.sans,
-      fontWeight: "900",
+    list: { paddingHorizontal: 10, paddingBottom: 16, flexGrow: 1 },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      padding: 12,
+      gap: 12,
+      minHeight: 86,
+      borderRadius: 11,
+      marginBottom: 2,
+    },
+    selectedRow: { backgroundColor: colors.selection },
+    rowBody: { flex: 1 },
+    name: {
+      color: colors.ink,
+      fontFamily: Fonts.sans,
       fontSize: 18,
-      color: BrutalColors.ink,
-      letterSpacing: -0.3,
+      lineHeight: 22,
     },
-    brandSubtitle: {
-      fontFamily: Fonts?.mono,
-      fontSize: 9,
-      fontWeight: "800",
-      color: BrutalColors.inkMuted,
-      letterSpacing: 1,
+    preview: {
+      marginTop: 4,
+      color: colors.inkMuted,
+      fontFamily: Fonts.sans,
+      fontSize: 13,
+      lineHeight: 19,
     },
-    brandingRight: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8,
-    },
-    iconBtn: {
-      width: 34,
-      height: 34,
-      borderWidth: 2,
-      borderColor: BrutalColors.border,
-      borderRadius: 4,
-      backgroundColor: BrutalColors.bgCard,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    iconBtnText: {
-      color: BrutalColors.ink,
-      fontSize: 14,
-      fontWeight: "800",
-    },
-    scrollList: {
-      padding: 16,
-      gap: 20,
-    },
-    searchBar: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      borderWidth: 2,
-      borderColor: BrutalColors.border,
-      borderRadius: 4,
-      backgroundColor: BrutalColors.bgCard,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-    },
-    searchBarText: {
-      fontFamily: Fonts?.mono,
-      fontSize: 11,
-      fontWeight: "700",
-      color: BrutalColors.inkMuted,
-    },
-    sectionTitle: {
-      fontFamily: Fonts?.sans,
-      fontWeight: "900",
-      fontSize: 11,
-      letterSpacing: 0.8,
-      color: BrutalColors.inkSecondary,
-    },
-    channelItem: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      paddingVertical: 8,
-      paddingHorizontal: 10,
-      borderRadius: 4,
-    },
-    channelItemActive: {
-      backgroundColor: BrutalColors.bgCard,
-      borderWidth: 2,
-      borderColor: BrutalColors.border,
-    },
-    channelIconBox: {
-      width: 24,
-      height: 24,
-      borderWidth: 2,
-      borderColor: BrutalColors.border,
-      borderRadius: 3,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    channelIconText: {
-      fontFamily: Fonts?.mono,
-      fontWeight: "900",
-      fontSize: 12,
-      color: "#1A1A1A",
-    },
-    channelName: {
-      flex: 1,
-      fontFamily: Fonts?.sans,
-      fontWeight: "700",
-      fontSize: 14,
-      color: BrutalColors.inkSecondary,
-    },
-    channelNameActive: {
-      color: BrutalColors.ink,
-      fontWeight: "900",
-    },
-    unreadBadge: {
-      backgroundColor: BrutalColors.accentYellow,
-      borderWidth: 1.5,
-      borderColor: BrutalColors.border,
-      borderRadius: 3,
-      paddingHorizontal: 6,
-      paddingVertical: 1,
-    },
-    unreadText: {
-      fontFamily: Fonts?.mono,
-      fontSize: 10,
-      fontWeight: "800",
-      color: "#1A1A1A",
-    },
-    statusTag: {
-      borderWidth: 1.5,
-      borderColor: BrutalColors.border,
-      borderRadius: 3,
+    badge: {
+      minWidth: 20,
       paddingHorizontal: 6,
       paddingVertical: 2,
+      borderRadius: 12,
+      backgroundColor: colors.bubbleSent,
     },
-    statusTagText: {
-      fontFamily: Fonts?.mono,
-      fontSize: 9,
-      fontWeight: "800",
-      color: BrutalColors.inkSecondary,
+    badgeText: { fontSize: 11, color: "#FFFFFF", fontFamily: Fonts.medium },
+    personError: {
+      color: colors.accentPink,
+      paddingHorizontal: 22,
+      paddingVertical: 10,
+      fontFamily: Fonts.sans,
+      fontSize: 14,
     },
-    memberItem: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      paddingVertical: 6,
-      paddingHorizontal: 10,
-    },
-    memberInfo: {
-      flex: 1,
-    },
-    memberName: {
-      fontFamily: Fonts?.sans,
-      fontWeight: "800",
-      fontSize: 13,
-      color: BrutalColors.ink,
-    },
-    memberRole: {
-      fontFamily: Fonts?.sans,
-      fontSize: 11,
-      fontWeight: "500",
-      color: BrutalColors.inkMuted,
-    },
-    userFooter: {
-      borderTopWidth: 3,
-      borderTopColor: BrutalColors.border,
-      backgroundColor: BrutalColors.bgCard,
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-    },
-    userMeta: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      flex: 1,
-    },
-    userTextCol: {
-      flex: 1,
-    },
-    userName: {
-      fontFamily: Fonts?.sans,
-      fontWeight: "900",
-      fontSize: 13,
-      color: BrutalColors.ink,
-    },
-    userHandle: {
-      fontFamily: Fonts?.mono,
-      fontSize: 10,
-      fontWeight: "700",
-      color: BrutalColors.inkMuted,
-    },
-    footerActions: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-    },
-    controlBtn: {
-      width: 32,
-      height: 32,
-      borderWidth: 2,
-      borderColor: BrutalColors.border,
-      borderRadius: 4,
-      backgroundColor: BrutalColors.bgCardAlt,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    controlIcon: {
-      color: BrutalColors.ink,
-      fontSize: 13,
+    empty: {
+      padding: 24,
+      color: colors.inkMuted,
+      fontFamily: Fonts.sans,
+      fontSize: 14,
+      lineHeight: 22,
     },
   });

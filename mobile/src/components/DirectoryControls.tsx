@@ -5,7 +5,7 @@ import {
   type BrutalPalette,
 } from "@/hooks/use-brutal-theme";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
-import { BrutalInput } from "./brutal/BrutalInput";
+import { SearchField } from "./ui/SearchField";
 import { BrutalButton } from "./brutal/BrutalButton";
 import { Fonts } from "@/constants/theme";
 
@@ -46,7 +46,7 @@ export function DirectoryControls({
   return (
     <View style={styles.container}>
       {showSearch && (
-        <BrutalInput
+        <SearchField
           accessibilityLabel={label}
           placeholder={label}
           value={query}
@@ -56,11 +56,13 @@ export function DirectoryControls({
           maxLength={120}
         />
       )}
-      <Text style={styles.summary}>
-        {total === undefined
-          ? "Up to 50 results per page"
-          : `${total} ${total === 1 ? "result" : "results"} · Up to 50 per page`}
-      </Text>
+      {(canPrevious || hasMore || query) && (
+        <Text style={styles.summary}>
+          {total === undefined
+            ? "Search results"
+            : `${total} ${total === 1 ? "result" : "results"}`}
+        </Text>
+      )}
       {loading ? <ActivityIndicator color={BrutalColors.ink} /> : null}
       {error ? (
         <View style={{ gap: 8 }}>
@@ -75,34 +77,36 @@ export function DirectoryControls({
           />
         </View>
       ) : null}
-      <View style={styles.buttons}>
-        <BrutalButton
-          title="Previous results"
-          accessibilityLabel={`${label}: Previous results`}
-          size="sm"
-          variant="outline"
-          disabled={loading || !canPrevious}
-          onPress={onPrevious}
-        />
-        <BrutalButton
-          title="Next results"
-          accessibilityLabel={`${label}: Next results`}
-          size="sm"
-          variant="outline"
-          disabled={loading || !hasMore}
-          onPress={onNext}
-        />
-        {!isFirst ? (
+      {(canPrevious || hasMore) && (
+        <View style={styles.buttons}>
           <BrutalButton
-            title="First results"
-            accessibilityLabel={`${label}: First results`}
+            title="Previous results"
+            accessibilityLabel={`${label}: Previous results`}
             size="sm"
             variant="outline"
-            disabled={loading}
-            onPress={onFirst}
+            disabled={loading || !canPrevious}
+            onPress={onPrevious}
           />
-        ) : null}
-      </View>
+          <BrutalButton
+            title="Next results"
+            accessibilityLabel={`${label}: Next results`}
+            size="sm"
+            variant="outline"
+            disabled={loading || !hasMore}
+            onPress={onNext}
+          />
+          {!isFirst ? (
+            <BrutalButton
+              title="First results"
+              accessibilityLabel={`${label}: First results`}
+              size="sm"
+              variant="outline"
+              disabled={loading}
+              onPress={onFirst}
+            />
+          ) : null}
+        </View>
+      )}
     </View>
   );
 }
@@ -110,8 +114,8 @@ const createStyles = (BrutalColors: BrutalPalette) =>
   StyleSheet.create({
     container: { gap: 10, marginVertical: 12 },
     summary: {
-      fontFamily: Fonts.mono,
-      fontSize: 11,
+      fontFamily: Fonts.sans,
+      fontSize: 12,
       color: BrutalColors.inkMuted,
     },
     buttons: { flexDirection: "row", flexWrap: "wrap", gap: 8 },

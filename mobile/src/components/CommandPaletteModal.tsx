@@ -9,7 +9,6 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
-  Pressable,
   SectionList,
   StyleSheet,
   Text,
@@ -24,10 +23,12 @@ import { MonogramAvatar } from "./brutal/MonogramAvatar";
 import { api } from "@/services/api";
 import { useDirectory } from "./useDirectory";
 import { DirectoryControls } from "./DirectoryControls";
+import { AppIcon } from "./ui/AppIcon";
+import { MotionPressable as Pressable } from "./ui/MotionPressable";
 interface CommandPaletteModalProps {
   visible: boolean;
   onClose: () => void;
-  onSelectChannel: (channelId: string) => void;
+  onSelectChannel: (channelId: string, workspaceId?: string) => void;
   onOpenSettings: () => void;
   onOpenMessageSearch?: () => void;
 }
@@ -59,7 +60,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     const term = query.trim().toLowerCase();
     return [
       {
-        title: "COMMANDS & ACTIONS",
+        title: "Commands & actions",
         kind: "commands",
         data: term
           ? []
@@ -77,13 +78,13 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
               {
                 kind: "command",
                 id: "settings",
-                title: "Open Studio Preferences",
+                title: "Open Settings",
                 action: onOpenSettings,
               },
             ] as Result[]),
       },
       {
-        title: "ROOMS & CHANNELS",
+        title: "Chats",
         kind: "rooms",
         data: (rooms.page?.data || []).map((channel): Result => ({
           kind: "channel",
@@ -91,7 +92,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
         })),
       },
       {
-        title: "STUDIO TEAM",
+        title: "People",
         kind: "people",
         data: (people.page?.data || []).map((member): Result => ({
           kind: "member",
@@ -114,14 +115,14 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
         <SafeAreaView style={[styles.modal, { height: "85%" }]}>
           <View style={styles.header}>
             <BrutalInput
-              accessibilityLabel="Search channels and members"
+              accessibilityLabel="Search chats and members"
               value={query}
               onChangeText={(value) => {
                 setQuery(value);
                 rooms.search(value);
                 people.search(value);
               }}
-              placeholder="Search channels, team, commands..."
+              placeholder="Search chats, group, commands…"
               autoFocus
               autoCorrect={false}
               maxLength={120}
@@ -134,7 +135,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
               onPress={onClose}
               style={styles.closeBtn}
             >
-              <Text style={styles.closeBtnText}>✕</Text>
+              <AppIcon name="close" size={24} />
             </Pressable>
           </View>
           <SectionList<Result>
@@ -166,7 +167,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
                     showSearch={false}
                     label={
                       section.kind === "rooms"
-                        ? "Search rooms"
+                        ? "Search chats"
                         : "Search members"
                     }
                     query={query}
@@ -187,7 +188,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
             }}
             ListEmptyComponent={
               <Text style={styles.itemSubtitle}>
-                No matching channels or members.
+                No matching chats or members.
               </Text>
             }
             renderItem={({ item }) =>
@@ -214,22 +215,19 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
                   onPress={() => {
                     onClose();
                     if (item.kind === "command") item.action();
-                    else onSelectChannel(item.channel.id);
+                    else onSelectChannel(item.channel.id, item.channel.workspaceId);
                   }}
                   style={styles.resultItem}
                 >
                   {item.kind === "command" ? (
-                    <Text style={styles.itemTitle}>{item.title}</Text>
+                    <>
+                      <AppIcon name={item.id === "settings" ? "settings" : "search"} size={23} />
+                      <Text style={styles.itemTitle}>{item.title}</Text>
+                    </>
                   ) : (
                     <>
                       <View style={styles.channelIconBadge}>
-                        <Text style={styles.channelIconText}>
-                          {item.channel.type === "text"
-                            ? "#"
-                            : item.channel.type === "audio"
-                              ? "◉"
-                              : "▶"}
-                        </Text>
+                        <AppIcon name={item.channel.type === "text" ? "chats" : item.channel.type === "audio" ? "call" : "video"} size={22} />
                       </View>
                       <View style={styles.itemTextCol}>
                         <Text style={styles.itemTitle}>
@@ -262,7 +260,7 @@ const createStyles = (BrutalColors: BrutalPalette) =>
     modal: {
       maxHeight: "80%",
       backgroundColor: BrutalColors.bgPaper,
-      borderWidth: 3.5,
+      borderWidth: 1,
       borderColor: BrutalColors.border,
       borderRadius: 8,
       overflow: "hidden",
@@ -273,7 +271,7 @@ const createStyles = (BrutalColors: BrutalPalette) =>
       padding: 12,
       gap: 10,
       backgroundColor: BrutalColors.bgCard,
-      borderBottomWidth: 3,
+      borderBottomWidth: 1,
       borderBottomColor: BrutalColors.border,
     },
     searchInput: {
@@ -283,9 +281,9 @@ const createStyles = (BrutalColors: BrutalPalette) =>
     closeBtn: {
       width: 36,
       height: 36,
-      borderWidth: 2,
+      borderWidth: 1,
       borderColor: BrutalColors.border,
-      borderRadius: 4,
+      borderRadius: 10,
       backgroundColor: BrutalColors.bgCardAlt,
       alignItems: "center",
       justifyContent: "center",
@@ -300,10 +298,10 @@ const createStyles = (BrutalColors: BrutalPalette) =>
       gap: 16,
     },
     sectionTitle: {
-      fontFamily: Fonts?.sans,
-      fontWeight: "900",
-      fontSize: 11,
-      letterSpacing: 0.8,
+      fontFamily: Fonts.semibold,
+      fontWeight: "400",
+      fontSize: 12,
+      letterSpacing: 0.1,
       color: BrutalColors.inkSecondary,
     },
     resultItem: {
@@ -311,39 +309,39 @@ const createStyles = (BrutalColors: BrutalPalette) =>
       alignItems: "center",
       gap: 10,
       backgroundColor: BrutalColors.bgCard,
-      borderWidth: 2,
+      borderWidth: 1,
       borderColor: BrutalColors.border,
-      borderRadius: 4,
+      borderRadius: 10,
       padding: 10,
     },
     channelIconBadge: {
       width: 26,
       height: 26,
-      borderWidth: 1.5,
+      borderWidth: 1,
       borderColor: BrutalColors.border,
-      borderRadius: 3,
+      borderRadius: 10,
       backgroundColor: BrutalColors.accentYellow,
       alignItems: "center",
       justifyContent: "center",
     },
     channelIconText: {
-      fontFamily: Fonts?.mono,
-      fontSize: 11,
-      fontWeight: "900",
+      fontFamily: Fonts.semibold,
+      fontSize: 12,
+      fontWeight: "400",
       color: "#1A1A1A",
     },
     itemTextCol: {
       flex: 1,
     },
     itemTitle: {
-      fontFamily: Fonts?.sans,
-      fontWeight: "800",
+      fontFamily: Fonts.semibold,
+      fontWeight: "400",
       fontSize: 13,
       color: BrutalColors.ink,
     },
     itemSubtitle: {
-      fontFamily: Fonts?.sans,
-      fontSize: 11,
+      fontFamily: Fonts.sans,
+      fontSize: 12,
       color: BrutalColors.inkMuted,
     },
   });

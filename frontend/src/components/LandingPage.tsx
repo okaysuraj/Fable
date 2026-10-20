@@ -1,175 +1,293 @@
-/** Public introduction and entry into the real authentication flow. */
-import React from "react";
-import { useNavigate } from "react-router-dom";
+/** Public product story: real capabilities, original artwork and a clearly illustrated tour. */
+import { useEffect } from "react";
+import { Brand } from "./Brand";
+import { IconChat, IconPin, IconSearch, IconUsers } from "./icons/Icons";
+import { LandingTour } from "./LandingTour";
+import { StoreDownloads, hasStoreDownloads } from "./StoreDownloads";
+import "../styles/landing.css";
 
-export const LandingPage: React.FC = () => {
-  const navigate = useNavigate();
-
+function Arrow({ diagonal = false }: { diagonal?: boolean }) {
   return (
-    <div className="min-h-screen bg-[var(--bg-paper)] relative paper-texture overflow-hidden">
-      {/* ═══ NAV BAR ═══ */}
-      <nav className="flex items-center justify-between px-8 py-5 relative z-10">
-        <div className="flex items-center gap-3">
-          <div
-            className="w-12 h-12 flex items-center justify-center font-display text-2xl border-[3px] border-[var(--border)]"
-            style={{
-              background: "var(--accent-yellow)",
-              boxShadow: "var(--shadow-sm)",
-            }}
-          >
-            F
-          </div>
-          <span className="font-display text-2xl tracking-tight">FABLE</span>
+    <svg
+      aria-hidden="true"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={diagonal ? "fl-arrow-diagonal" : undefined}
+    >
+      <path d="M4 12h15m-6-6 6 6-6 6" />
+    </svg>
+  );
+}
+
+export function LandingPage() {
+  useEffect(() => {
+    const previousTitle = document.title;
+    document.title = "Fable — A home for good conversations";
+    return () => {
+      document.title = previousTitle;
+    };
+  }, []);
+  const questions = [
+    {
+      title: "What is Fable?",
+      answer:
+        "Fable is a place for group conversations. Bring people together, make a chat for what matters, and find your way back to the messages you want to keep.",
+    },
+    {
+      title: "Can a chat be private?",
+      answer:
+        "Yes. Private chats are available to the people you add. Shared chats are available to members of your group, so you can choose the right space for each conversation.",
+    },
+    {
+      title: "Can I use it on my phone?",
+      answer: hasStoreDownloads
+        ? "Fable is built for iPhone and Android. Choose an available app store link below to download it to your phone."
+        : "Fable is built for iPhone and Android. App Store and Google Play downloads are coming soon.",
+    },
+    {
+      title: "How do I get started?",
+      answer: hasStoreDownloads
+        ? "Choose an available store link below to download Fable. Sign in on your phone with Google, or create an account with your email and verify it. Then invite your people."
+        : "Fable's App Store and Google Play listings are coming soon. Once available, download the mobile app and sign in with Google or your verified email account.",
+    },
+  ];
+  return (
+    <div className="fable-landing" id="top">
+      <a className="fl-skip-link" href="#landing-content">
+        Skip to content
+      </a>
+      <header className="fl-masthead">
+        <a href="#top" className="fl-logo" aria-label="Fable, back to top">
+          <img src="/favicon.svg" width="29" height="29" alt="" />
+          <Brand />
+        </a>
+        <nav className="fl-navigation" aria-label="Main navigation">
+          <a href="#why-fable">Why Fable</a>
+          <a href="#tour">A look inside</a>
+          <a href="#questions">Questions</a>
+        </nav>
+        <div className="fl-account-links">
+          <a href="#download" className="fl-button fl-button-small">
+            Get the app
+            <Arrow diagonal />
+          </a>
         </div>
+      </header>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate("/login")}
-            className="brutal-btn brutal-btn-outline brutal-btn-sm"
-          >
-            LOG IN
-          </button>
-          <button
-            onClick={() => navigate("/login?mode=register")}
-            className="brutal-btn brutal-btn-sm"
-          >
-            SIGN UP
-          </button>
-        </div>
-      </nav>
-
-      {/* ═══ HERO ═══ */}
-      <main className="max-w-6xl mx-auto px-8 pt-16 pb-24 relative z-10">
-        <div className="grid lg:grid-cols-2 gap-16 items-center">
-          {/* Left — Copy */}
-          <div className="space-y-8">
-            <div
-              className="inline-flex items-center gap-2 brutal-tag"
-              style={{ background: "var(--accent-yellow)" }}
-            >
-              <span className="w-2 h-2 bg-[var(--accent-green)] rounded-full" />
-              NOW IN BETA
-            </div>
-
-            <h1 className="font-display text-6xl md:text-7xl lg:text-8xl leading-[0.9] tracking-tight">
-              TALK
+      <main id="landing-content" tabIndex={-1}>
+        <section className="fl-hero" aria-labelledby="landing-title">
+          <div className="fl-hero-copy">
+            <p className="fl-intro">A space for your people.</p>
+            <h1 id="landing-title">
+              A home for
               <br />
-              <span className="text-[var(--accent-pink)]">BOLD.</span>
-              <br />
-              BUILD
-              <br />
-              <span className="text-[var(--accent-blue)]">LOUD.</span>
+              good conversations.
             </h1>
-
-            <p className="text-lg text-[var(--ink-secondary)] max-w-md leading-relaxed font-medium">
-              A shared workspace for creative studios. Keep conversations
-              organized and build together.
+            <p className="fl-hero-description">
+              For the plans, the projects, and the people that make them matter.
+              Bring your group’s conversations into one considered space.
             </p>
-
-            <div className="flex flex-wrap gap-4 pt-2">
-              <button
-                onClick={() => navigate("/login?mode=register")}
-                className="brutal-btn text-base px-8 py-4"
-              >
-                GET STARTED →
-              </button>
-              <button
-                onClick={() => navigate("/login")}
-                className="brutal-btn brutal-btn-outline text-base px-8 py-4"
-              >
-                I HAVE AN ACCOUNT
-              </button>
+            <div className="fl-hero-actions" id="download">
+              <StoreDownloads />
+              <a href="#tour" className="fl-text-link">
+                Take a look inside
+              </a>
             </div>
           </div>
+          <figure className="fl-hero-art">
+            <div className="fl-art-orbit" aria-hidden="true" />
+            <img
+              className="fl-sculpture"
+              src="/brand/conversation-sculpture.svg"
+              width="600"
+              height="600"
+              alt=""
+              fetchPriority="high"
+            />
+            <figcaption>
+              Good company.
+              <br />
+              <span>Wherever life takes you.</span>
+            </figcaption>
+          </figure>
+          <div className="fl-hero-footnote">
+            <span>Made for the way we connect.</span>
+            <a href="#why-fable" aria-label="Explore why Fable">
+              <span aria-hidden="true">↓</span> There’s more below
+            </a>
+          </div>
+        </section>
 
-          {/* Right — Feature Cards Stack */}
-          <div className="space-y-5">
-            <h2 className="font-display text-lg">STUDIO ARSENAL</h2>
-            {[
-              {
-                title: "TEXT CHANNELS",
-                desc: "Organized rooms for every topic. Share messages and reactions with your team.",
-                accent: "var(--accent-yellow)",
-                icon: "#",
-              },
-              {
-                title: "PRIVATE ROOMS",
-                desc: "Choose who can join the conversation, and manage membership in one place.",
-                accent: "var(--accent-pink)",
-                icon: "◉",
-              },
-              {
-                title: "MESSAGE HISTORY",
-                desc: "Find earlier conversations with full-history search, and pin messages you need again.",
-                accent: "var(--accent-blue)",
-                icon: "▶",
-              },
-              {
-                title: "SHARED WORKSPACES",
-                desc: "Invite your team, manage roles, and keep separate projects in their own spaces.",
-                accent: "var(--accent-green)",
-                icon: "~",
-              },
-            ].map((feature) => (
-              <div
-                key={feature.title}
-                className="brutal-card p-6 flex items-start gap-5 hover:translate-x-0 hover:-translate-y-0.5 transition-transform"
-              >
-                <div
-                  className="w-14 h-14 flex items-center justify-center font-display text-2xl border-[3px] border-[var(--border)] shrink-0"
-                  style={{
-                    background: feature.accent,
-                    boxShadow: "var(--shadow-sm)",
-                  }}
-                >
-                  {feature.icon}
-                </div>
-                <div>
-                  <h3 className="font-display text-lg tracking-tight">
-                    {feature.title}
-                  </h3>
-                  <p className="text-sm text-[var(--ink-secondary)] mt-1 leading-relaxed">
-                    {feature.desc}
-                  </p>
-                </div>
-              </div>
+        <div className="fl-capability-strip" aria-label="Fable features">
+          <span>
+            <IconChat size={18} />
+            Group conversations
+          </span>
+          <span>
+            <IconUsers size={18} />
+            Public & private chats
+          </span>
+          <span>
+            <IconSearch size={18} />
+            Searchable history
+          </span>
+          <span>
+            <IconPin size={18} />
+            Messages worth keeping
+          </span>
+        </div>
+
+        <section
+          className="fl-introduction fl-section"
+          id="why-fable"
+          aria-labelledby="why-title"
+        >
+          <p className="fl-section-label">Stay in the conversation</p>
+          <div>
+            <h2 id="why-title">
+              The little things
+              <br />
+              bring us together.
+            </h2>
+            <p>
+              A quick hello. A half-formed idea. A plan that finally comes
+              together. Fable gives those moments a place to live, with simple
+              conversations and the details close at hand.
+            </p>
+          </div>
+        </section>
+
+        <LandingTour />
+
+        <section
+          className="fl-circles fl-section"
+          aria-labelledby="circles-title"
+        >
+          <div className="fl-circles-copy">
+            <p className="fl-section-label">One place, all your circles</p>
+            <h2 id="circles-title">
+              For the people
+              <br />
+              you do life with.
+            </h2>
+            <p>
+              Keep your groups separate and your conversations together. Make a
+              shared chat for the whole group, or a private one for a smaller
+              circle.
+            </p>
+            <a className="fl-text-link" href="#download">
+              Find it on your phone
+              <Arrow />
+            </a>
+          </div>
+          <div
+            className="fl-circles-visual"
+            aria-label="Fable brings together friends, projects and communities"
+          >
+            <div className="fl-circle-orbit" aria-hidden="true" />
+            <div className="fl-circle-label fl-circle-friends">
+              <IconHeartMark />
+              Friends & everyday life
+            </div>
+            <div className="fl-circle-core" aria-hidden="true">
+              <img src="/favicon.svg" width="64" height="64" alt="" />
+            </div>
+            <div className="fl-circle-label fl-circle-projects">
+              <IconChat size={20} />
+              Ideas & side projects
+            </div>
+            <div className="fl-circle-label fl-circle-communities">
+              <IconUsers size={20} />
+              Clubs & communities
+            </div>
+          </div>
+        </section>
+
+        <section
+          className="fl-questions fl-section"
+          id="questions"
+          aria-labelledby="questions-title"
+        >
+          <div>
+            <p className="fl-section-label">A few things to know</p>
+            <h2 id="questions-title">Glad you asked.</h2>
+          </div>
+          <div className="fl-question-list">
+            {questions.map((question) => (
+              <details key={question.title}>
+                <summary>
+                  {question.title}
+                  <span className="fl-question-plus" aria-hidden="true">
+                    +
+                  </span>
+                </summary>
+                <p>{question.answer}</p>
+              </details>
             ))}
           </div>
-        </div>
+        </section>
+
+        <section className="fl-invitation" aria-labelledby="invitation-title">
+          <div className="fl-invitation-art" aria-hidden="true">
+            <span />
+            <span />
+          </div>
+          <div className="fl-invitation-copy">
+            <p>Every good story starts somewhere.</p>
+            <h2 id="invitation-title">
+              Make room
+              <br />
+              for your people.
+            </h2>
+            <StoreDownloads />
+          </div>
+        </section>
       </main>
 
-      {/* ═══ BOTTOM STRIP ═══ */}
-      <footer className="border-t-[3px] border-[var(--border)] bg-[var(--ink)] text-white py-6 px-8">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-8 h-8 flex items-center justify-center font-display text-sm border-[2px] border-white"
-              style={{
-                background: "var(--accent-yellow)",
-                color: "var(--ink)",
-              }}
-            >
-              F
-            </div>
-            <span className="font-mono-code text-sm text-white/60">
-              FABLE STUDIO © 2026
-            </span>
-          </div>
-          <p className="font-mono-code text-xs text-white/70 uppercase tracking-wider">
-            CONVERSATIONS FOR CREATIVE TEAMS
-          </p>
+      <footer className="fl-footer">
+        <div className="fl-footer-top">
+          <a href="#top" className="fl-logo" aria-label="Fable, back to top">
+            <Brand />
+          </a>
+          <p>Conversations, kept close.</p>
+          <nav aria-label="Footer navigation">
+            <a href="#tour">Explore</a>
+            <a href="#questions">Questions</a>
+            <a href="#download">Get the app</a>
+          </nav>
+        </div>
+        <span className="fl-footer-wordmark" translate="no" aria-hidden="true">
+          fable.
+        </span>
+        <div className="fl-footer-bottom">
+          <span>© {new Date().getFullYear()} Fable</span>
+          <a href="#top">Back to top ↑</a>
         </div>
       </footer>
-
-      {/* ═══ DECORATIVE ELEMENTS ═══ */}
-      <div
-        className="absolute top-32 -right-16 w-64 h-64 border-[4px] border-[var(--border)] rotate-12 opacity-10 pointer-events-none"
-        style={{ background: "var(--accent-yellow)" }}
-      />
-      <div
-        className="absolute -bottom-20 -left-20 w-80 h-80 border-[4px] border-[var(--border)] -rotate-6 opacity-8 pointer-events-none"
-        style={{ background: "var(--accent-pink)" }}
-      />
     </div>
   );
-};
+}
+
+function IconHeartMark() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 20S3 14.5 3 8.5a4.5 4.5 0 0 1 9-1 4.5 4.5 0 0 1 9 1C21 14.5 12 20 12 20Z" />
+    </svg>
+  );
+}

@@ -56,7 +56,7 @@ export function MessageSearchModal({
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <View style={styles.header}>
-            <Text style={styles.title}>SEARCH MESSAGES</Text>
+            <Text style={styles.title}>Search messages</Text>
             <BrutalButton
               title="Close"
               size="sm"
@@ -79,11 +79,9 @@ export function MessageSearchModal({
                   current page.
                 </Text>
                 <View style={styles.row}>
-                  <Text style={styles.copy}>
-                    All accessible workspace channels
-                  </Text>
+                  <Text style={styles.copy}>All accessible group chats</Text>
                   <Switch
-                    accessibilityLabel="Search all workspace channels"
+                    accessibilityLabel="Search all group chats"
                     value={workspaceScope}
                     onValueChange={(value) => {
                       setWorkspaceScope(value);
@@ -92,9 +90,7 @@ export function MessageSearchModal({
                   />
                 </View>
                 <Text style={styles.copy}>
-                  {workspaceScope
-                    ? "Workspace search"
-                    : `Searching #${channelName}`}
+                  {workspaceScope ? "Group search" : `Searching ${channelName}`}
                 </Text>
                 <DirectoryControls
                   label="Search messages (at least 2 characters)"
@@ -129,13 +125,13 @@ export function MessageSearchModal({
             renderItem={({ item }) => (
               <View style={styles.card}>
                 <Text style={styles.heading}>
-                  #{item.channel.name} · {item.message.sender.name}
+                  {item.channel.name} · {item.message.sender.name}
                 </Text>
                 <Text style={styles.date}>
                   {new Date(item.message.timestamp).toLocaleString()}
                 </Text>
                 {item.message.content ? (
-                  <Text selectable style={styles.copy}>
+                  <Text selectable style={styles.message}>
                     {item.message.content}
                   </Text>
                 ) : null}
@@ -167,7 +163,7 @@ const createStyles = (BrutalColors: BrutalPalette) =>
     container: { flex: 1, backgroundColor: BrutalColors.bgPaper },
     header: {
       padding: 16,
-      borderBottomWidth: 3,
+      borderBottomWidth: 1,
       borderColor: BrutalColors.border,
       flexDirection: "row",
       alignItems: "center",
@@ -176,8 +172,8 @@ const createStyles = (BrutalColors: BrutalPalette) =>
     },
     title: {
       flex: 1,
-      fontFamily: Fonts.sans,
-      fontWeight: "900",
+      fontFamily: Fonts.semibold,
+      fontWeight: "400",
       fontSize: 18,
       color: BrutalColors.ink,
     },
@@ -192,14 +188,14 @@ const createStyles = (BrutalColors: BrutalPalette) =>
     },
     card: {
       padding: 16,
-      borderWidth: 2,
+      borderWidth: 1,
       borderColor: BrutalColors.border,
       backgroundColor: BrutalColors.bgCard,
       gap: 12,
     },
     heading: {
-      fontFamily: Fonts.sans,
-      fontWeight: "800",
+      fontFamily: Fonts.semibold,
+      fontWeight: "400",
       fontSize: 14,
       color: BrutalColors.ink,
     },
@@ -210,9 +206,15 @@ const createStyles = (BrutalColors: BrutalPalette) =>
       color: BrutalColors.inkSecondary,
     },
     code: { fontFamily: Fonts.mono, fontSize: 13, color: BrutalColors.ink },
+    message: {
+      fontFamily: Fonts.sans,
+      fontSize: 18,
+      lineHeight: 25,
+      color: BrutalColors.ink,
+    },
     date: {
-      fontFamily: Fonts.mono,
-      fontSize: 11,
+      fontFamily: Fonts.sans,
+      fontSize: 12,
       color: BrutalColors.inkMuted,
     },
   });
