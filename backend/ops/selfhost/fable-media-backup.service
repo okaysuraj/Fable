@@ -1,0 +1,12 @@
+[Unit]
+Description=Fable private media backup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/fable/backup-media.sh
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/fable

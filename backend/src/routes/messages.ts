@@ -1,5 +1,6 @@
 /** Validate message HTTP inputs and delegate consistent reads and transactional mutations. */
 import { Router } from "express";
+import { emitChannel, lockEventOrder } from "../lib/events.js";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -190,6 +191,7 @@ messagesRouter.post(
       )
       .digest("hex");
     const result = await prisma.$transaction(async (tx) => {
+      await lockEventOrder(tx);
       await lockChannel(tx, input.channelId);
       const channel = await tx.channel.findFirst({
         where: { id: input.channelId, ...channelScope(req) },
@@ -286,6 +288,12 @@ messagesRouter.post(
       });
       await tx.messageChange.create({
         data: { channelId: message.channelId, messageId: message.id },
+      });
+      await emitChannel(tx, channel.id, {
+        type: "message.created",
+        targetId: message.id,
+        notify: true,
+        excludePushUserId: req.auth!.userId,
       });
       return {
         data: formatMessage(

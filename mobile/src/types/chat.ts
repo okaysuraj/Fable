@@ -77,12 +77,14 @@ export interface ConversationPresence {
 }
 export interface CallSession {
   id: string;
+  nativeId: string;
   channelId: string;
   callerId: string;
   calleeId: string;
   kind: "audio" | "video";
   status: "ringing" | "active" | "ended" | "declined";
   offer: string | null;
+  offerHash: string | null;
   answer: string | null;
   createdAt: string;
 }
@@ -103,6 +105,8 @@ export interface WorkspaceSettings {
   noiseCancellation: boolean;
   spatialAudio: boolean;
   theme: ThemeMode;
+  notificationsEnabled: boolean;
+  notificationPreviews: boolean;
   inputVolume: number;
   outputVolume: number;
 }

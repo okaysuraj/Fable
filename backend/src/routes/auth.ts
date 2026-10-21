@@ -6,11 +6,17 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireIdentity, requireAuth, AuthRequest } from "../lib/auth.js";
 import { getFirebaseAuth } from "../lib/firebase.js";
-import { config } from "../lib/config.js";
 import { asyncRoute, HttpError, parse } from "../lib/http.js";
 import { formatUser, publicUserSelect } from "../lib/access.js";
 import { authenticatedLimiter } from "../lib/rateLimits.js";
-import { photoType, sendProfilePhoto } from "../lib/profilePhoto.js";
+import { sendProfilePhoto } from "../lib/profilePhoto.js";
+import {
+  prepareImage,
+  storeObject,
+  mediaCapacity,
+  mediaRoute,
+} from "../lib/storage.js";
+import { emitProfile, lockEventOrder } from "../lib/events.js";
 
 export const authRouter = Router();
 authRouter.post(["/register", "/login"], (_req, res) => {
@@ -71,19 +77,12 @@ authRouter.post(
             data: { email, firebaseUid: identity.uid, userId: user.id },
             include: { user: { select: publicUserSelect } },
           });
-          const workspace = await tx.workspace.create({
+          // Provision the authorization scope without creating a conversation.
+          // A new messenger account starts with an empty chat list.
+          await tx.workspace.create({
             data: {
               name: `${name}'s workspace`,
               members: { create: { userId: user.id, role: "owner" } },
-            },
-          });
-          await tx.channel.create({
-            data: {
-              workspaceId: workspace.id,
-              name: "general",
-              topic: "",
-              createdById: user.id,
-              members: { create: { userId: user.id } },
             },
           });
           return created;
@@ -169,18 +168,23 @@ authRouter.patch(
             : Array.from(words[0])[1] || "")
         ).toUpperCase()
       : undefined;
-    const user = await prisma.user.update({
-      where: { id: req.auth!.userId },
-      data: {
-        ...(input.name !== undefined ? { name: input.name, monogram } : {}),
-        ...(input.statusText !== undefined
-          ? { statusText: input.statusText || null }
-          : {}),
-        ...(input.phoneNumber !== undefined
-          ? { phoneNumber: input.phoneNumber }
-          : {}),
-      },
-      select: { ...publicUserSelect, phoneNumber: true },
+    const user = await prisma.$transaction(async (tx) => {
+      await lockEventOrder(tx);
+      const saved = await tx.user.update({
+        where: { id: req.auth!.userId },
+        data: {
+          ...(input.name !== undefined ? { name: input.name, monogram } : {}),
+          ...(input.statusText !== undefined
+            ? { statusText: input.statusText || null }
+            : {}),
+          ...(input.phoneNumber !== undefined
+            ? { phoneNumber: input.phoneNumber }
+            : {}),
+        },
+        select: { ...publicUserSelect, phoneNumber: true },
+      });
+      await emitProfile(tx, req.auth!.userId);
+      return saved;
     });
     res.json({ user: { ...formatUser(user), email: req.auth!.email } });
   }),
@@ -197,19 +201,27 @@ authRouter.put(
   "/profile/photo",
   requireAuth,
   authenticatedLimiter,
+  mediaCapacity,
   express.raw({ type: "application/octet-stream", limit: "2mb" }),
-  asyncRoute(async (req: AuthRequest, res) => {
+  mediaRoute(async (req: AuthRequest, res) => {
     if (!Buffer.isBuffer(req.body) || !req.body.length)
       throw new HttpError(400, "Choose a photo up to 2 MB");
-    const bytes: Buffer = req.body;
-    const user = await prisma.user.update({
-      where: { id: req.auth!.userId },
-      data: {
-        photoBytes: new Uint8Array(bytes),
-        photoMimeType: photoType(bytes),
-        photoVersion: { increment: 1 },
-      },
-      select: { ...publicUserSelect, phoneNumber: true },
+    const image = await prepareImage(req.body, true);
+    const photoStorageKey = await storeObject(image.bytes, image.mimeType);
+    const user = await prisma.$transaction(async (tx) => {
+      await lockEventOrder(tx);
+      const saved = await tx.user.update({
+        where: { id: req.auth!.userId },
+        data: {
+          photoBytes: null,
+          photoStorageKey,
+          photoMimeType: image.mimeType,
+          photoVersion: { increment: 1 },
+        },
+        select: { ...publicUserSelect, phoneNumber: true },
+      });
+      await emitProfile(tx, req.auth!.userId);
+      return saved;
     });
     res.json({ user: { ...formatUser(user), email: req.auth!.email } });
   }),
@@ -219,10 +231,20 @@ authRouter.delete(
   requireAuth,
   authenticatedLimiter,
   asyncRoute(async (req: AuthRequest, res) => {
-    const user = await prisma.user.update({
-      where: { id: req.auth!.userId },
-      data: { photoBytes: null, photoMimeType: null, photoVersion: 0 },
-      select: { ...publicUserSelect, phoneNumber: true },
+    const user = await prisma.$transaction(async (tx) => {
+      await lockEventOrder(tx);
+      const saved = await tx.user.update({
+        where: { id: req.auth!.userId },
+        data: {
+          photoBytes: null,
+          photoStorageKey: null,
+          photoMimeType: null,
+          photoVersion: { increment: 1 },
+        },
+        select: { ...publicUserSelect, phoneNumber: true },
+      });
+      await emitProfile(tx, req.auth!.userId);
+      return saved;
     });
     res.json({ user: { ...formatUser(user), email: req.auth!.email } });
   }),
@@ -233,12 +255,10 @@ authRouter.post(
   requireAuth,
   authenticatedLimiter,
   asyncRoute(async (req: AuthRequest, res) => {
-    if (config.devIdentity)
-      throw new HttpError(
-        409,
-        "Device session revocation is unavailable in development authentication mode",
-      );
     await getFirebaseAuth().revokeRefreshTokens(req.auth!.firebaseUid);
+    await prisma.deviceInstallation.deleteMany({
+      where: { userId: req.auth!.userId },
+    });
     await prisma.user.update({
       where: { id: req.auth!.userId },
       data: { lastSeenAt: null },

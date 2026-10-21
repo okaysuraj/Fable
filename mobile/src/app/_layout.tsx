@@ -1,5 +1,6 @@
 /** Load the bundled brand/chat face before presenting the native routes. */
 import { useEffect } from "react";
+import "@/services/backgroundCalls";
 import { Stack } from "expo-router";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";

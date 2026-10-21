@@ -219,7 +219,9 @@ export function ProfileModal({
               </Text>
               <AppIcon name="lock" size={16} color={colors.inkFaint} />
             </View>
-            <Text style={styles.hint}>Your sign-in email stays private.</Text>
+            <Text style={styles.hint}>
+              People can find you using your full email address.
+            </Text>
             <Text style={styles.label}>Phone number</Text>
             <BrutalInput
               accessibilityLabel="Phone number with country code"

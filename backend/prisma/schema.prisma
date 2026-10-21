@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
 }
 
 model Account {
@@ -17,29 +18,35 @@ model Account {
 }
 
 model User {
-  id              String            @id @default(cuid())
-  name            String
-  handle          String            @unique
-  monogram        String
-  role            String            @default("Member")
-  status          String            @default("offline")
-  statusText      String?
-  avatarColor     String?
-  phoneNumber     String?           @db.VarChar(16)
-  photoBytes      Bytes?
-  photoMimeType   String?
-  photoVersion    Int               @default(0)
-  lastSeenAt      DateTime?         @db.Timestamptz(3)
-  account         Account?
-  messages        Message[]
-  reactions       Reaction[]
-  memberships     WorkspaceMember[]
-  channels        ChannelMember[]
-  createdChannels Channel[]         @relation("ChannelCreator")
-  auditEvents     AuditEvent[]
-  settings        WorkspaceSetting?
-  createdAt       DateTime          @default(now()) @db.Timestamptz(3)
-  updatedAt       DateTime          @updatedAt @db.Timestamptz(3)
+  id                      String                     @id @default(cuid())
+  name                    String
+  handle                  String                     @unique
+  monogram                String
+  role                    String                     @default("Member")
+  status                  String                     @default("offline")
+  statusText              String?
+  avatarColor             String?
+  phoneNumber             String?                    @db.VarChar(16)
+  photoBytes              Bytes?
+  photoStorageKey         String?                    @unique
+  photoObject             StorageObject?             @relation(fields: [photoStorageKey], references: [key], onDelete: Restrict)
+  photoMimeType           String?
+  photoVersion            Int                        @default(0)
+  lastSeenAt              DateTime?                  @db.Timestamptz(3)
+  account                 Account?
+  messages                Message[]
+  reactions               Reaction[]
+  memberships             WorkspaceMember[]
+  channels                ChannelMember[]
+  createdChannels         Channel[]                  @relation("ChannelCreator")
+  auditEvents             AuditEvent[]
+  settings                WorkspaceSetting?
+  devices                 DeviceInstallation[]
+  events                  UserEvent[]
+  notificationPreferences ConversationNotification[]
+  groupCallParticipants   GroupCallParticipant[]
+  createdAt               DateTime                   @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime                   @updatedAt @db.Timestamptz(3)
 
   @@index([phoneNumber])
 }
@@ -69,24 +76,26 @@ model WorkspaceMember {
 }
 
 model Channel {
-  id          String          @id @default(cuid())
-  workspaceId String
-  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  name        String
-  topic       String          @default("")
-  type        String          @default("text")
-  isPrivate   Boolean         @default(false)
-  directKey   String?         @unique
-  lastMessageAt DateTime      @default(now()) @db.Timestamptz(3)
-  createdById String?
-  createdBy   User?           @relation("ChannelCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  members     ChannelMember[]
-  messages    Message[]
-  changes     MessageChange[]
-  calls       Call[]
-  assets      MediaAsset[]
-  createdAt   DateTime        @default(now()) @db.Timestamptz(3)
-  updatedAt   DateTime        @updatedAt @db.Timestamptz(3)
+  id                      String                     @id @default(cuid())
+  workspaceId             String
+  workspace               Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name                    String
+  topic                   String                     @default("")
+  type                    String                     @default("text")
+  isPrivate               Boolean                    @default(false)
+  directKey               String?                    @unique
+  lastMessageAt           DateTime                   @default(now()) @db.Timestamptz(3)
+  createdById             String?
+  createdBy               User?                      @relation("ChannelCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  members                 ChannelMember[]
+  messages                Message[]
+  changes                 MessageChange[]
+  calls                   Call[]
+  assets                  MediaAsset[]
+  notificationPreferences ConversationNotification[]
+  groupCalls              GroupCall[]
+  createdAt               DateTime                   @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime                   @updatedAt @db.Timestamptz(3)
 
   @@unique([workspaceId, name])
   @@index([workspaceId, createdAt, id])
@@ -96,12 +105,12 @@ model Channel {
 model ChannelMember {
   channelId         String
   userId            String
-  channel           Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lastReadAt        DateTime @default(now()) @db.Timestamptz(3)
+  channel           Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastReadAt        DateTime  @default(now()) @db.Timestamptz(3)
   lastReadMessageId String?
   typingUntil       DateTime? @db.Timestamptz(3)
-  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  createdAt         DateTime  @default(now()) @db.Timestamptz(3)
 
   @@id([channelId, userId])
   @@index([userId])
@@ -109,53 +118,54 @@ model ChannelMember {
 }
 
 model Message {
-  id          String          @id @default(cuid())
-  channelId   String
-  channel     Channel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  senderId    String
-  sender      User            @relation(fields: [senderId], references: [id], onDelete: Restrict)
-  content     String
-  replyToId   String?
-  replyTo     Message?        @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies     Message[]       @relation("MessageReplies")
-  assets      MediaAsset[]
+  id                 String          @id @default(cuid())
+  channelId          String
+  channel            Channel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  senderId           String
+  sender             User            @relation(fields: [senderId], references: [id], onDelete: Restrict)
+  content            String
+  replyToId          String?
+  replyTo            Message?        @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies            Message[]       @relation("MessageReplies")
+  assets             MediaAsset[]
   clientMutationId   String?
   clientMutationHash String?
-  codeSnippet Json?
-  voiceNote   Json?
-  attachments Json?
-  isPinned    Boolean         @default(false)
-  reactions   Reaction[]
-  changes     MessageChange[]
-  version     Int             @default(1)
-  updatedAt   DateTime        @updatedAt @db.Timestamptz(3)
-  editedAt    DateTime?       @db.Timestamptz(3)
-  deletedAt   DateTime?       @db.Timestamptz(3)
-  createdAt   DateTime        @default(now()) @db.Timestamptz(3)
+  codeSnippet        Json?
+  voiceNote          Json?
+  attachments        Json?
+  isPinned           Boolean         @default(false)
+  reactions          Reaction[]
+  changes            MessageChange[]
+  version            Int             @default(1)
+  updatedAt          DateTime        @updatedAt @db.Timestamptz(3)
+  editedAt           DateTime?       @db.Timestamptz(3)
+  deletedAt          DateTime?       @db.Timestamptz(3)
+  createdAt          DateTime        @default(now()) @db.Timestamptz(3)
 
+  @@unique([channelId, senderId, clientMutationId])
   @@index([channelId, createdAt, id])
   @@index([senderId])
   @@index([replyToId])
   @@index([channelId, isPinned, createdAt, id])
-  @@unique([channelId, senderId, clientMutationId])
 }
 
 // Signaling is short-lived and participant-scoped; media never passes through PostgreSQL.
 model Call {
-  id          String   @id @default(cuid())
-  channelId   String
-  channel     Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  callerId    String
-  calleeId    String
-  kind        String
-  status      String   @default("ringing")
-  offer       String?
-  answer      String?
-  callerSeenAt DateTime @default(now()) @db.Timestamptz(3)
+  id           String    @id @default(cuid())
+  nativeId     String    @unique @default(uuid()) @db.Uuid
+  channelId    String
+  channel      Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  callerId     String
+  calleeId     String
+  kind         String
+  status       String    @default("ringing")
+  offer        String?
+  answer       String?
+  callerSeenAt DateTime  @default(now()) @db.Timestamptz(3)
   calleeSeenAt DateTime? @db.Timestamptz(3)
-  createdAt   DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
-  expiresAt   DateTime @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
+  expiresAt    DateTime  @db.Timestamptz(3)
 
   @@index([channelId, createdAt, id])
   @@index([calleeId, status, expiresAt])
@@ -164,23 +174,122 @@ model Call {
 
 // Bounded local-first media storage. Bytes stay behind the same membership checks as text.
 model MediaAsset {
-  id        String   @id @default(cuid())
-  channelId String
-  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  ownerId   String
-  messageId String?
-  message   Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  name      String
-  mimeType  String
-  size      Int
-  digest    String?
-  bytes     Bytes
-  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  id         String         @id @default(cuid())
+  channelId  String
+  channel    Channel        @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  ownerId    String
+  messageId  String?
+  message    Message?       @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  name       String
+  mimeType   String
+  size       Int
+  digest     String?
+  bytes      Bytes?
+  storageKey String?        @unique
+  object     StorageObject? @relation(fields: [storageKey], references: [key], onDelete: Restrict)
+  createdAt  DateTime       @default(now()) @db.Timestamptz(3)
 
   @@index([channelId, ownerId])
   @@index([messageId])
   @@index([ownerId, createdAt])
   @@index([ownerId, channelId, digest])
+}
+
+// The object registry also tracks abandoned uploads, so durable cleanup can reclaim them.
+model StorageObject {
+  key       String      @id
+  size      Int
+  mimeType  String
+  createdAt DateTime    @default(now()) @db.Timestamptz(3)
+  asset     MediaAsset?
+  profile   User?
+
+  @@index([createdAt, key])
+}
+
+model GroupCall {
+  id           String                 @id @default(uuid()) @db.Uuid
+  channelId    String
+  channel      Channel                @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  kind         String
+  createdAt    DateTime               @default(now()) @db.Timestamptz(3)
+  endedAt      DateTime?              @db.Timestamptz(3)
+  participants GroupCallParticipant[]
+
+  @@index([channelId, endedAt])
+}
+
+model GroupCallParticipant {
+  callId     String    @db.Uuid
+  call       GroupCall @relation(fields: [callId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId  String    @unique @db.Uuid
+  lastSeenAt DateTime  @default(now()) @db.Timestamptz(3)
+  leftAt     DateTime? @db.Timestamptz(3)
+
+  @@id([callId, userId])
+  @@index([userId, leftAt, lastSeenAt])
+}
+
+model DeviceInstallation {
+  id         String         @id @db.Uuid
+  userId     String
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider   String
+  token      String         @unique
+  voipToken  String?        @unique
+  sandbox    Boolean        @default(false)
+  enabled    Boolean        @default(true)
+  updatedAt  DateTime       @updatedAt @db.Timestamptz(3)
+  createdAt  DateTime       @default(now()) @db.Timestamptz(3)
+  deliveries PushDelivery[]
+
+  @@index([userId, enabled])
+}
+
+// IDs are allocated under a transaction advisory lock, preserving commit order.
+// Events contain invalidation identifiers, never private message bodies or identity tokens.
+model UserEvent {
+  id          BigInt         @id @default(autoincrement())
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String
+  targetId    String
+  channelId   String?
+  workspaceId String?
+  createdAt   DateTime       @default(now()) @db.Timestamptz(3)
+  deliveries  PushDelivery[]
+
+  @@index([userId, id])
+  @@index([createdAt, id])
+}
+
+model PushDelivery {
+  id          BigInt             @id @default(autoincrement())
+  eventId     BigInt
+  event       UserEvent          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  deviceId    String             @db.Uuid
+  device      DeviceInstallation @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  attempts    Int                @default(0)
+  availableAt DateTime           @default(now()) @db.Timestamptz(3)
+  leaseUntil  DateTime?          @db.Timestamptz(3)
+  leaseOwner  String?            @db.Uuid
+  completedAt DateTime?          @db.Timestamptz(3)
+  errorCode   String?
+
+  @@unique([eventId, deviceId])
+  @@index([completedAt, availableAt, leaseUntil])
+}
+
+model ConversationNotification {
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channelId String
+  channel   Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  muted     Boolean @default(false)
+
+  @@id([userId, channelId])
 }
 
 model MessageChange {
@@ -237,18 +346,20 @@ model Invitation {
 }
 
 model WorkspaceSetting {
-  id                String   @id @default(cuid())
-  userId            String?  @unique
-  user              User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  micDeviceId       String   @default("default")
-  cameraDeviceId    String   @default("default")
-  speakerDeviceId   String   @default("default")
-  noiseCancellation Boolean  @default(true)
-  spatialAudio      Boolean  @default(true)
-  theme             String   @default("dark")
-  inputVolume       Int      @default(85)
-  outputVolume      Int      @default(90)
-  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
+  id                   String   @id @default(cuid())
+  userId               String?  @unique
+  user                 User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  micDeviceId          String   @default("default")
+  cameraDeviceId       String   @default("default")
+  speakerDeviceId      String   @default("default")
+  noiseCancellation    Boolean  @default(true)
+  spatialAudio         Boolean  @default(true)
+  theme                String   @default("dark")
+  notificationsEnabled Boolean  @default(true)
+  notificationPreviews Boolean  @default(false)
+  inputVolume          Int      @default(85)
+  outputVolume         Int      @default(90)
+  updatedAt            DateTime @updatedAt @db.Timestamptz(3)
 }
 
 // Archived pre-migration display metadata has no public API. Review before importing.

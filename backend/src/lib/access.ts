@@ -86,6 +86,7 @@ export const publicUserSelect = {
   statusText: true,
   avatarColor: true,
   photoVersion: true,
+  photoMimeType: true,
   lastSeenAt: true,
 } as const;
 
@@ -100,10 +101,14 @@ export function formatUser(user: {
   avatarColor: string | null;
   lastSeenAt: Date | null;
   photoVersion?: number;
+  photoMimeType?: string | null;
 }) {
-  const { lastSeenAt, ...profile } = user;
+  const { lastSeenAt, photoMimeType, ...profile } = user;
   return {
     ...profile,
+    ...(photoMimeType !== undefined
+      ? { photoVersion: photoMimeType ? user.photoVersion : 0 }
+      : {}),
     status:
       lastSeenAt && Date.now() - lastSeenAt.getTime() < 120000
         ? "online"

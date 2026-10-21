@@ -1,0 +1,29 @@
+[Unit]
+Description=Fable API and group calling media worker
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=fable
+Group=fable
+WorkingDirectory=/opt/fable/backend
+EnvironmentFile=/etc/fable/api.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/fable
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

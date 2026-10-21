@@ -5,7 +5,7 @@ import { AuthRequest } from "./auth.js";
 import { accessibleChannel, workspaceActor } from "./access.js";
 import { HttpError, parse } from "./http.js";
 import { formatMessages, messageInclude } from "./messages.js";
-import { prisma } from "./prisma.js";
+import { prisma, sqlTable } from "./prisma.js";
 
 const searchQuery = z
   .object({
@@ -62,11 +62,11 @@ export async function searchMessages(req: AuthRequest) {
       const rows = await tx.$queryRaw<
         { id: string; createdAt: Date }[]
       >(Prisma.sql`
-      SELECT m."id", m."createdAt" FROM "Message" m
-      INNER JOIN "Channel" c ON c."id" = m."channelId"
+      SELECT m."id", m."createdAt" FROM ${sqlTable("Message")} m
+      INNER JOIN ${sqlTable("Channel")} c ON c."id" = m."channelId"
       WHERE c."workspaceId" = ${req.auth!.workspaceId!} AND m."deletedAt" IS NULL
-        AND EXISTS (SELECT 1 FROM "WorkspaceMember" wm WHERE wm."workspaceId" = c."workspaceId" AND wm."userId" = ${req.auth!.userId})
-        AND (c."isPrivate" = false OR EXISTS (SELECT 1 FROM "ChannelMember" cm WHERE cm."channelId" = c."id" AND cm."userId" = ${req.auth!.userId}))
+        AND EXISTS (SELECT 1 FROM ${sqlTable("WorkspaceMember")} wm WHERE wm."workspaceId" = c."workspaceId" AND wm."userId" = ${req.auth!.userId})
+        AND (c."isPrivate" = false OR EXISTS (SELECT 1 FROM ${sqlTable("ChannelMember")} cm WHERE cm."channelId" = c."id" AND cm."userId" = ${req.auth!.userId}))
         AND to_tsvector('simple', m."content" || ' ' || COALESCE(m."codeSnippet"->>'code', '')) @@ plainto_tsquery('simple', ${q})
         ${channelId ? Prisma.sql`AND c."id" = ${channelId}` : Prisma.empty}
         ${cursor ? Prisma.sql`AND (m."createdAt", m."id") < (${new Date(cursor.at)}, ${cursor.id})` : Prisma.empty}

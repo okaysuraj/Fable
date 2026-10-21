@@ -1,22 +1,28 @@
-import Constants from "expo-constants";
+import { isRunningInExpoGo } from "expo";
 import { Platform } from "react-native";
 import { firebaseConfigured } from "./firebaseConfig";
 
 const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim();
 const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim();
 const validClientId = (value: string | undefined) =>
-  Boolean(value && /^[\w-]+\.apps\.googleusercontent\.com$/.test(value));
+  Boolean(
+    value &&
+    !/REPLACE_WITH|^your[-_]|^placeholder(?:[-_]|$)|^mock(?:[-_]|$)/i.test(
+      value,
+    ) &&
+    /^[\w-]+\.apps\.googleusercontent\.com$/.test(value),
+  );
 
 export const googleSignInUnavailableReason =
   !firebaseConfigured ||
   !validClientId(webClientId) ||
   (Platform.OS === "ios" && !validClientId(iosClientId))
     ? "Google sign-in isn't configured for this build yet."
-    : Constants.executionEnvironment === "storeClient"
+    : isRunningInExpoGo()
       ? "Google sign-in is available in the installed Fable app."
       : null;
 
-// Lazy loading keeps email/password and local development usable without the native Google module.
+// Email/password remains available when the native Google module is unavailable.
 let sdkPromise:
   Promise<typeof import("react-native-nitro-google-signin")> | undefined;
 async function getSdk() {

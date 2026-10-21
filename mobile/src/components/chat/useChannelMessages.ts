@@ -8,6 +8,7 @@ import {
 import { AppState } from "react-native";
 import type { Channel, Message, User, WorkspaceSettings } from "@/types/chat";
 import { api, ApiError, type MessagePage } from "@/services/api";
+import { subscribeRealtime } from "@/services/realtime";
 import {
   mergeMessageWindow,
   mergePinnedWindow,
@@ -91,6 +92,24 @@ export function useChannelMessages({
   const latestVersions = useRef(new Map<string, number>());
   const retainedIds = useRef(new Set<string>());
   const profileBatches = useRef<string[][]>([]);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = subscribeRealtime((event) => {
+      if (
+        event.type === "call.updated" ||
+        (event.channelId && event.channelId !== selectedChannel.current)
+      )
+        return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (AppState.currentState === "active") void requestRefresh.current?.();
+      }, 120);
+    });
+    return () => {
+      unsubscribe();
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   useEffect(() => {
     retainedIds.current = new Set(

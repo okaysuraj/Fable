@@ -12,6 +12,8 @@ import { mediaRouter } from "./routes/media.js";
 import { messagesRouter } from "./routes/messages.js";
 import { teamRouter } from "./routes/team.js";
 import { contactsRouter } from "./routes/contacts.js";
+import { devicesRouter } from "./routes/devices.js";
+import { groupCallsRouter } from "./routes/groupCalls.js";
 import { settingsRouter } from "./routes/settings.js";
 import { workspaceRouter } from "./routes/workspace.js";
 import { requireAuth } from "./lib/auth.js";
@@ -69,6 +71,13 @@ app.use("/api/media", requireAuth, authenticatedLimiter, mediaRouter);
 app.use("/api/messages", requireAuth, authenticatedLimiter, messagesRouter);
 app.use("/api/team", requireAuth, authenticatedLimiter, teamRouter);
 app.use("/api/contacts", requireAuth, authenticatedLimiter, contactsRouter);
+app.use("/api/devices", requireAuth, authenticatedLimiter, devicesRouter);
+app.use(
+  "/api/group-calls",
+  requireAuth,
+  authenticatedLimiter,
+  groupCallsRouter,
+);
 app.use("/api/settings", requireAuth, authenticatedLimiter, settingsRouter);
 app.use("/api/workspace", requireAuth, authenticatedLimiter, workspaceRouter);
 app.get("/", (_req, res) => {
@@ -93,6 +102,10 @@ app.use(
             ? 400
             : databaseErrorStatus(error) || 500;
     if (status >= 500) logServerError("api_error", error, res.locals.requestId);
+    if (res.headersSent || res.destroyed) {
+      if (!res.destroyed) res.destroy();
+      return;
+    }
     const message =
       error instanceof HttpError
         ? error.message

@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { AppState, Platform, Text, View } from "react-native";
+import { AppState, Keyboard, Platform, Text, View } from "react-native";
 import { choosePhoto } from "@/services/photos";
 import { AppIcon } from "../ui/AppIcon";
 import { MotionPressable as Pressable } from "../ui/MotionPressable";
@@ -52,6 +52,7 @@ export function MediaComposer({
   const status = useAudioRecorderState(recorder);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [attachmentMenu, setAttachmentMenu] = useState(false);
   const [pending, setPending] = useState<{ name: string; uri: string } | null>(
     null,
   );
@@ -60,6 +61,31 @@ export function MediaComposer({
   const recording = useRef(false);
   const recordingOperation = useRef(false);
   const localFiles = useRef(new Set<string>());
+  const chooseAttachment = async (source: "library" | "file") => {
+    if (inFlight.current || recordingOperation.current) return;
+    setAttachmentMenu(false);
+    setError("");
+    try {
+      if (source === "library") {
+        const photo = await choosePhoto("library");
+        if (photo && mounted.current) await upload(photo.name, photo.uri);
+      } else {
+        const result = await DocumentPicker.getDocumentAsync({
+          copyToCacheDirectory: true,
+          multiple: false,
+        });
+        if (!result.canceled && result.assets[0] && mounted.current)
+          await upload(result.assets[0].name, result.assets[0].uri);
+      }
+    } catch (failure) {
+      if (mounted.current)
+        setError(
+          failure instanceof Error
+            ? failure.message
+            : "Couldn't choose this attachment.",
+        );
+    }
+  };
   const upload = async (name: string, uri: string) => {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -236,6 +262,43 @@ export function MediaComposer({
         backgroundColor: colors.chatBackground,
       }}
     >
+      {attachmentMenu && (
+        <View
+          accessibilityLabel="Choose attachment source"
+          style={{
+            flexDirection: "row",
+            gap: 12,
+            padding: 12,
+            borderRadius: 18,
+            backgroundColor: colors.chatReceived,
+          }}
+        >
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void chooseAttachment("library")}
+            style={{ flex: 1, alignItems: "center", gap: 6, padding: 12 }}
+          >
+            <AppIcon name="photos" size={28} color={colors.chatAccent} />
+            <Text style={{ color: colors.chatInk }}>Photo library</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void chooseAttachment("file")}
+            style={{ flex: 1, alignItems: "center", gap: 6, padding: 12 }}
+          >
+            <AppIcon name="document" size={28} color={colors.chatAccent} />
+            <Text style={{ color: colors.chatInk }}>Files</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close attachment choices"
+            onPress={() => setAttachmentMenu(false)}
+            style={{ padding: 12 }}
+          >
+            <AppIcon name="close" size={22} />
+          </Pressable>
+        </View>
+      )}
       <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 6 }}>
         <View
           style={{
@@ -256,22 +319,9 @@ export function MediaComposer({
               disabled || busy || status.isRecording || assets.length >= 4
             }
             style={{ padding: 12, minHeight: 48, minWidth: 48 }}
-            onPress={async () => {
-              setError("");
-              try {
-                const result = await DocumentPicker.getDocumentAsync({
-                  copyToCacheDirectory: true,
-                  multiple: false,
-                });
-                if (!result.canceled && result.assets[0])
-                  await upload(result.assets[0].name, result.assets[0].uri);
-              } catch (failure) {
-                setError(
-                  failure instanceof Error
-                    ? failure.message
-                    : "Could not choose this file.",
-                );
-              }
+            onPress={() => {
+              Keyboard.dismiss();
+              setAttachmentMenu((value) => !value);
             }}
           >
             <AppIcon name="attach" size={24} color={colors.chatMuted} />

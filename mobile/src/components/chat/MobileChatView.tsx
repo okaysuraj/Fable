@@ -37,6 +37,10 @@ import { MonogramAvatar } from "../brutal/MonogramAvatar";
 import { ChatWallpaper } from "./ChatWallpaper";
 import { AppIcon } from "../ui/AppIcon";
 import { MotionPressable as Pressable } from "../ui/MotionPressable";
+import { api } from "@/services/api";
+import { useGroupCalling } from "../calling/GroupCallingProvider";
+import { groupCalls, type GroupCallSummary } from "@/services/groupCalls";
+import { subscribeRealtime } from "@/services/realtime";
 
 interface MobileChatViewProps {
   hideBackButton?: boolean;
@@ -116,6 +120,41 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
   const [assets, setAssets] = useState<MediaAsset[]>([]);
   const [mediaBusy, setMediaBusy] = useState(false);
   const calling = useCalling();
+  const groupCalling = useGroupCalling();
+  const [groupCallingEnabled, setGroupCallingEnabled] = useState(false);
+  const [groupCall, setGroupCall] = useState<{
+    channelId: string;
+    call: GroupCallSummary | null;
+  } | null>(null);
+  const liveGroupCall =
+    groupCall?.channelId === channel.id ? groupCall.call : null;
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      if (channel.isDirect || !channel.isPrivate) return;
+      const capability = await groupCalls.config();
+      if (!alive) return;
+      setGroupCallingEnabled(capability.data.enabled);
+      if (capability.data.enabled) {
+        const active = await groupCalls.active(channel.id);
+        if (alive) setGroupCall({ channelId: channel.id, call: active });
+      }
+    };
+    void load().catch(() => {
+      /* Existing message synchronization continues during calling-service outages. */
+    });
+    const unsubscribe = subscribeRealtime((event) => {
+      if (
+        event.type === "ready" ||
+        (event.type === "groupcall.updated" && event.channelId === channel.id)
+      )
+        void load().catch(() => {});
+    });
+    return () => {
+      alive = false;
+      unsubscribe();
+    };
+  }, [channel.id, channel.isDirect, channel.isPrivate]);
   const [reply, setReply] = useState<Message | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
@@ -125,6 +164,45 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
   );
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
+  const [muteState, setMuteState] = useState<{
+    channelId: string;
+    muted: boolean;
+  } | null>(null);
+  const muted = muteState?.channelId === channel.id ? muteState.muted : null;
+  const mutePending = useRef(false);
+  useEffect(() => {
+    let alive = true;
+    void api
+      .notificationPreference(channel.id)
+      .then((value) => {
+        if (alive) setMuteState({ channelId: channel.id, muted: value.muted });
+      })
+      .catch(() => {
+        if (alive) setSendError("Chat notification settings couldn't load.");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [channel.id]);
+  const toggleMute = async () => {
+    if (mutePending.current || muted === null) return;
+    mutePending.current = true;
+    try {
+      const preference = await api.setNotificationPreference(
+        channel.id,
+        !muted,
+      );
+      setMuteState({ channelId: channel.id, muted: preference.muted });
+    } catch (error) {
+      setSendError(
+        error instanceof Error
+          ? error.message
+          : "Couldn't update chat notifications.",
+      );
+    } finally {
+      mutePending.current = false;
+    }
+  };
   const [showPinned, setShowPinned] = useState(false);
   const sendInFlight = useRef(false);
   const flatListRef = useRef<FlatList<Message>>(null);
@@ -342,13 +420,16 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
               </View>
             </Pressable>
             <View style={styles.headerActions}>
-              {channel.isDirect && (
+              {(channel.isDirect ||
+                (channel.isPrivate && groupCallingEnabled)) && (
                 <>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Start video call"
                     onPress={() =>
-                      calling.start(channel.id, "video", channel.name)
+                      channel.isDirect
+                        ? calling.start(channel.id, "video", channel.name)
+                        : groupCalling.start(channel.id, "video", channel.name)
                     }
                     style={styles.headerActionBtn}
                   >
@@ -362,7 +443,9 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
                     accessibilityRole="button"
                     accessibilityLabel="Start audio call"
                     onPress={() =>
-                      calling.start(channel.id, "audio", channel.name)
+                      channel.isDirect
+                        ? calling.start(channel.id, "audio", channel.name)
+                        : groupCalling.start(channel.id, "audio", channel.name)
                     }
                     style={styles.headerActionBtn}
                   >
@@ -392,6 +475,37 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
               </Pressable>
             </View>
           </View>
+          {liveGroupCall && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Join ongoing group call"
+              onPress={() =>
+                groupCalling.start(channel.id, liveGroupCall.kind, channel.name)
+              }
+              style={{
+                paddingHorizontal: 18,
+                paddingVertical: 12,
+                backgroundColor: BrutalColors.chatReceived,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <AppIcon
+                name={liveGroupCall.kind === "video" ? "video" : "call"}
+                size={22}
+                color={BrutalColors.chatAccent}
+              />
+              <Text style={{ color: BrutalColors.chatInk, flex: 1 }}>
+                Group call · {liveGroupCall.participants.length} joined
+              </Text>
+              <Text
+                style={{ color: BrutalColors.chatAccent, fontWeight: "600" }}
+              >
+                Join
+              </Text>
+            </Pressable>
+          )}
           {(showPinned || pinnedMessages.length > 0 || hasOlderPins) && (
             <Pressable
               accessibilityRole="button"
@@ -815,6 +929,25 @@ export const MobileChatView: React.FC<MobileChatViewProps> = ({
                     <Text style={styles.chatMenuText}>{option.title}</Text>
                   </Pressable>
                 ))}
+                {muted !== null && (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      setHeaderMenuOpen(false);
+                      void toggleMute();
+                    }}
+                    style={styles.chatMenuRow}
+                  >
+                    <AppIcon
+                      name={muted ? "notifications" : "notificationsOff"}
+                      size={22}
+                      color={BrutalColors.chatAccent}
+                    />
+                    <Text style={styles.chatMenuText}>
+                      {muted ? "Unmute notifications" : "Mute notifications"}
+                    </Text>
+                  </Pressable>
+                )}
               </View>
             </View>
           )}

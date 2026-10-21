@@ -21,9 +21,8 @@ import {
 import { BrutalButton } from "./brutal/BrutalButton";
 import { AppIcon, type AppIconName } from "./ui/AppIcon";
 import { MotionPressable } from "./ui/MotionPressable";
-import { api, authError } from "@/services/api";
+import { api, authError, EmailVerificationRequiredError } from "@/services/api";
 import type { User } from "@/types/chat";
-import { devAuthEnabled } from "@/services/developmentAuth";
 import { FableBrand } from "./FableBrand";
 import { firebaseConfigured } from "@/services/firebaseConfig";
 import { googleSignInUnavailableReason } from "@/services/googleSignIn";
@@ -157,8 +156,10 @@ export const LoginView: React.FC<LoginViewProps> = ({
         onSuccess(res.user);
       }
     } catch (err: unknown) {
-      if (err instanceof Error && /verify your email/i.test(err.message))
+      if (err instanceof EmailVerificationRequiredError) {
         setVerificationPending(true);
+        setMode("login");
+      }
       setError(authError(err));
     } finally {
       inFlight.current = false;
@@ -250,261 +251,213 @@ export const LoginView: React.FC<LoginViewProps> = ({
                   : "Welcome to your people."}
             </Text>
             <Text style={styles.subtitle}>
-              {devAuthEnabled
-                ? "Open your local account and pick up the conversation."
-                : mode === "reset"
-                  ? "We'll email you a link to reset your password."
-                  : mode === "register"
-                    ? "Create an account to start your next conversation."
-                    : "Sign in to pick up where you left off."}
+              {mode === "reset"
+                ? "We'll email you a link to reset your password."
+                : mode === "register"
+                  ? "Create an account to start your next conversation."
+                  : "Sign in to pick up where you left off."}
             </Text>
           </View>
 
           <View style={styles.form}>
-            {devAuthEnabled ? (
-              <BrutalButton
-                title={loading ? "Opening chats…" : "Continue in development"}
-                size="lg"
-                disabled={loading}
-                icon={
-                  <AppIcon name="chats" color={colors.onPrimary} size={21} />
-                }
-                onPress={() => {
-                  if (inFlight.current) return;
-                  inFlight.current = true;
-                  setLoading(true);
-                  setError("");
-                  void api
-                    .startDevelopment()
-                    .then((result) => onSuccess(result.user))
-                    .catch((failure: unknown) => setError(authError(failure)))
-                    .finally(() => {
-                      inFlight.current = false;
-                      setLoading(false);
-                    });
-                }}
-              />
-            ) : (
+            {!firebaseConfigured && (
+              <View style={styles.noticeBox}>
+                <AppIcon name="info" size={20} />
+                <Text accessibilityRole="alert" style={styles.noticeText}>
+                  Sign-in is not configured for this build yet.
+                </Text>
+              </View>
+            )}
+            {mode !== "reset" && (
               <>
-                {!firebaseConfigured && (
-                  <View style={styles.noticeBox}>
-                    <AppIcon name="info" size={20} />
-                    <Text accessibilityRole="alert" style={styles.noticeText}>
-                      Sign-in is not configured for this build yet.
-                    </Text>
-                  </View>
-                )}
-                {mode !== "reset" && (
-                  <>
-                    <BrutalButton
-                      title={
-                        googleLoading
-                          ? "Connecting to Google…"
-                          : "Continue with Google"
-                      }
-                      variant="outline"
-                      size="lg"
-                      onPress={handleGoogle}
-                      disabled={
-                        loading || Boolean(googleSignInUnavailableReason)
-                      }
-                      icon={
-                        <AppIcon name="google" color={colors.ink} size={21} />
-                      }
-                    />
-                    {googleSignInUnavailableReason && firebaseConfigured ? (
-                      <Text style={styles.helper}>
-                        {googleSignInUnavailableReason}
-                      </Text>
-                    ) : null}
-                    <View style={styles.divider}>
-                      <View style={styles.dividerLine} />
-                      <Text style={styles.dividerText}>
-                        or sign in with email
-                      </Text>
-                      <View style={styles.dividerLine} />
-                    </View>
-                  </>
-                )}
-
-                {mode === "register" && (
-                  <AuthField
-                    label="Your name"
-                    icon="profile"
-                    value={name}
-                    onChangeText={setName}
-                    placeholder="Your name"
-                    autoComplete="name"
-                    maxLength={80}
-                    editable={!loading}
-                    autoCapitalize="words"
-                  />
-                )}
-                <AuthField
-                  label="Email"
-                  icon="mail"
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder="you@example.com"
-                  autoComplete="email"
-                  keyboardType="email-address"
-                  textContentType="emailAddress"
-                  maxLength={254}
-                  editable={!loading}
-                  autoCapitalize="none"
-                />
-                {mode !== "reset" && (
-                  <AuthField
-                    label="Password"
-                    icon="lock"
-                    secret
-                    value={password}
-                    onChangeText={setPassword}
-                    placeholder={
-                      mode === "register"
-                        ? "At least 12 characters"
-                        : "Your password"
-                    }
-                    autoComplete={
-                      mode === "register" ? "new-password" : "current-password"
-                    }
-                    textContentType={
-                      mode === "register" ? "newPassword" : "password"
-                    }
-                    maxLength={128}
-                    editable={!loading}
-                    autoCapitalize="none"
-                    returnKeyType={mode === "login" ? "go" : "next"}
-                    onSubmitEditing={
-                      mode === "login" ? () => void handleSubmit() : undefined
-                    }
-                  />
-                )}
-                {mode === "register" && (
-                  <AuthField
-                    label="Confirm password"
-                    icon="lock"
-                    secret
-                    value={confirmation}
-                    onChangeText={setConfirmation}
-                    placeholder="Repeat your password"
-                    autoComplete="new-password"
-                    textContentType="newPassword"
-                    maxLength={128}
-                    editable={!loading}
-                    autoCapitalize="none"
-                  />
-                )}
-                {mode === "login" && (
-                  <MotionPressable
-                    accessibilityRole="button"
-                    disabled={loading}
-                    onPress={() => changeMode("reset")}
-                    style={styles.forgot}
-                  >
-                    <Text style={styles.link}>Forgot password?</Text>
-                  </MotionPressable>
-                )}
-                {mode === "register" && (
-                  <Text style={styles.helper}>
-                    Use at least 12 characters. We’ll send a link to verify your
-                    email before you sign in.
-                  </Text>
-                )}
-                {notice ? (
-                  <View style={styles.noticeBox}>
-                    <AppIcon name="check" size={21} />
-                    <Text
-                      accessibilityLiveRegion="polite"
-                      style={styles.noticeText}
-                    >
-                      {notice}
-                    </Text>
-                  </View>
-                ) : null}
-                {error ? (
-                  <View style={styles.errorBox}>
-                    <AppIcon
-                      name="alert"
-                      size={21}
-                      color={colors.dangerButton}
-                    />
-                    <Text
-                      accessibilityRole="alert"
-                      accessibilityLiveRegion="assertive"
-                      style={styles.errorText}
-                    >
-                      {error}
-                    </Text>
-                  </View>
-                ) : null}
                 <BrutalButton
                   title={
-                    loading
-                      ? "One moment…"
-                      : mode === "reset"
-                        ? "Send reset link"
-                        : mode === "login"
-                          ? "Sign in"
-                          : "Create account"
+                    googleLoading
+                      ? "Connecting to Google…"
+                      : "Continue with Google"
                   }
+                  variant="outline"
                   size="lg"
-                  onPress={handleSubmit}
-                  disabled={loading || !firebaseConfigured}
-                  style={styles.submit}
-                  icon={
-                    loading ? undefined : (
-                      <AppIcon
-                        name={mode === "reset" ? "mail" : "forward"}
-                        size={20}
-                        color={colors.onPrimary}
-                      />
-                    )
-                  }
+                  onPress={handleGoogle}
+                  disabled={loading || Boolean(googleSignInUnavailableReason)}
+                  icon={<AppIcon name="google" color={colors.ink} size={21} />}
                 />
-                {mode === "login" && verificationPending && (
-                  <BrutalButton
-                    title="Resend verification email"
-                    onPress={handleResend}
-                    disabled={loading}
-                    variant="outline"
-                    icon={
-                      <AppIcon
-                        name="mail"
-                        size={19}
-                        color={colors.inkSecondary}
-                      />
-                    }
-                  />
-                )}
-                <View style={styles.footer}>
-                  <Text style={styles.footerText}>
-                    {mode === "login"
-                      ? "New to Fable?"
-                      : mode === "register"
-                        ? "Already have an account?"
-                        : "Remember your password?"}
+                {googleSignInUnavailableReason && firebaseConfigured ? (
+                  <Text style={styles.helper}>
+                    {googleSignInUnavailableReason}
                   </Text>
-                  <MotionPressable
-                    accessibilityRole="button"
-                    disabled={loading}
-                    onPress={() =>
-                      changeMode(mode === "login" ? "register" : "login")
-                    }
-                    style={styles.footerLink}
-                  >
-                    <Text style={styles.link}>
-                      {mode === "login" ? "Create account" : "Sign in"}
-                    </Text>
-                  </MotionPressable>
+                ) : null}
+                <View style={styles.divider}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>or sign in with email</Text>
+                  <View style={styles.dividerLine} />
                 </View>
               </>
             )}
-            {devAuthEnabled && error ? (
-              <Text accessibilityRole="alert" style={styles.errorText}>
-                {error}
+
+            {mode === "register" && (
+              <AuthField
+                label="Your name"
+                icon="profile"
+                value={name}
+                onChangeText={setName}
+                placeholder="Your name"
+                autoComplete="name"
+                maxLength={80}
+                editable={!loading}
+                autoCapitalize="words"
+              />
+            )}
+            <AuthField
+              label="Email"
+              icon="mail"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="you@example.com"
+              autoComplete="email"
+              keyboardType="email-address"
+              textContentType="emailAddress"
+              maxLength={254}
+              editable={!loading}
+              autoCapitalize="none"
+            />
+            {mode !== "reset" && (
+              <AuthField
+                label="Password"
+                icon="lock"
+                secret
+                value={password}
+                onChangeText={setPassword}
+                placeholder={
+                  mode === "register"
+                    ? "At least 12 characters"
+                    : "Your password"
+                }
+                autoComplete={
+                  mode === "register" ? "new-password" : "current-password"
+                }
+                textContentType={
+                  mode === "register" ? "newPassword" : "password"
+                }
+                maxLength={4096}
+                editable={!loading}
+                autoCapitalize="none"
+                returnKeyType={mode === "login" ? "go" : "next"}
+                onSubmitEditing={
+                  mode === "login" ? () => void handleSubmit() : undefined
+                }
+              />
+            )}
+            {mode === "register" && (
+              <AuthField
+                label="Confirm password"
+                icon="lock"
+                secret
+                value={confirmation}
+                onChangeText={setConfirmation}
+                placeholder="Repeat your password"
+                autoComplete="new-password"
+                textContentType="newPassword"
+                maxLength={4096}
+                editable={!loading}
+                autoCapitalize="none"
+              />
+            )}
+            {mode === "login" && (
+              <MotionPressable
+                accessibilityRole="button"
+                disabled={loading}
+                onPress={() => changeMode("reset")}
+                style={styles.forgot}
+              >
+                <Text style={styles.link}>Forgot password?</Text>
+              </MotionPressable>
+            )}
+            {mode === "register" && (
+              <Text style={styles.helper}>
+                Use at least 12 characters. We’ll send a link to verify your
+                email before you sign in.
               </Text>
+            )}
+            {notice ? (
+              <View style={styles.noticeBox}>
+                <AppIcon name="check" size={21} />
+                <Text
+                  accessibilityLiveRegion="polite"
+                  style={styles.noticeText}
+                >
+                  {notice}
+                </Text>
+              </View>
             ) : null}
+            {error ? (
+              <View style={styles.errorBox}>
+                <AppIcon name="alert" size={21} color={colors.dangerButton} />
+                <Text
+                  accessibilityRole="alert"
+                  accessibilityLiveRegion="assertive"
+                  style={styles.errorText}
+                >
+                  {error}
+                </Text>
+              </View>
+            ) : null}
+            <BrutalButton
+              title={
+                loading
+                  ? "One moment…"
+                  : mode === "reset"
+                    ? "Send reset link"
+                    : mode === "login"
+                      ? "Sign in"
+                      : "Create account"
+              }
+              size="lg"
+              onPress={handleSubmit}
+              disabled={loading || !firebaseConfigured}
+              style={styles.submit}
+              icon={
+                loading ? undefined : (
+                  <AppIcon
+                    name={mode === "reset" ? "mail" : "forward"}
+                    size={20}
+                    color={colors.onPrimary}
+                  />
+                )
+              }
+            />
+            {mode === "login" && verificationPending && (
+              <BrutalButton
+                title="Resend verification email"
+                onPress={handleResend}
+                disabled={loading}
+                variant="outline"
+                icon={
+                  <AppIcon name="mail" size={19} color={colors.inkSecondary} />
+                }
+              />
+            )}
+            <View style={styles.footer}>
+              <Text style={styles.footerText}>
+                {mode === "login"
+                  ? "New to Fable?"
+                  : mode === "register"
+                    ? "Already have an account?"
+                    : "Remember your password?"}
+              </Text>
+              <MotionPressable
+                accessibilityRole="button"
+                disabled={loading}
+                onPress={() =>
+                  changeMode(mode === "login" ? "register" : "login")
+                }
+                style={styles.footerLink}
+              >
+                <Text style={styles.link}>
+                  {mode === "login" ? "Create account" : "Sign in"}
+                </Text>
+              </MotionPressable>
+            </View>
           </View>
           <Text style={styles.tagline}>Good conversations belong here.</Text>
         </ScrollView>

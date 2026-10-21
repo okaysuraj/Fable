@@ -96,14 +96,6 @@ workspaceRouter.post(
         },
         select: { id: true, name: true },
       });
-      await tx.channel.create({
-        data: {
-          workspaceId: created.id,
-          name: "general",
-          createdById: req.auth!.userId,
-          members: { create: { userId: req.auth!.userId } },
-        },
-      });
       await tx.auditEvent.create({
         data: {
           workspaceId: created.id,

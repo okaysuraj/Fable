@@ -13,13 +13,13 @@ import {
   onAuthStateChanged,
   GoogleAuthProvider,
   signInWithCredential,
+  validatePassword,
   type User as FirebaseUser,
 } from "firebase/auth";
 import { getFirebaseAuth } from "./firebase";
 import { FirebaseError } from "firebase/app";
 import type { User } from "@/types/chat";
 import { ApiError, requestJson } from "./request";
-import { devAuthEnabled } from "./developmentAuth";
 import { firebaseConfigured } from "./firebaseConfig";
 import { getGoogleIdToken } from "./googleSignIn";
 
@@ -43,6 +43,12 @@ export function authError(error: unknown): string {
     "auth/too-many-requests": "Too many attempts. Please wait and try again.",
     "auth/network-request-failed":
       "Cannot reach authentication. Check your connection and try again.",
+    "auth/invalid-api-key":
+      "Firebase sign-in isn't configured correctly for this build.",
+    "auth/app-not-authorized":
+      "This app isn't authorized for the configured Firebase project.",
+    "auth/configuration-not-found":
+      "Enable Email/Password and Google sign-in in Firebase Authentication.",
     "auth/operation-not-allowed":
       "This sign-in method hasn't been enabled for Fable yet.",
     "auth/account-exists-with-different-credential":
@@ -56,15 +62,12 @@ export function authError(error: unknown): string {
   );
 }
 const TOKEN_KEY = "fable_token";
-// This development-only marker is public state, not a stored Firebase token.
-const DEVELOPMENT_SESSION_KEY = "fable_development_session";
-let developmentSession: Promise<boolean> | undefined;
 let legacyCleanup: Promise<void> | undefined;
 let selectedWorkspace: string | null = null;
 let workspaceLoaded = false;
 
 export function onSessionExpired(listener: () => void): () => void {
-  if (devAuthEnabled || !firebaseConfigured) return () => {};
+  if (!firebaseConfigured) return () => {};
   const auth = getFirebaseAuth();
   let previouslySignedIn = Boolean(auth.currentUser);
   return onAuthStateChanged(auth, (user) => {
@@ -75,19 +78,31 @@ export function onSessionExpired(listener: () => void): () => void {
 
 export async function getSessionToken(): Promise<string | null> {
   // Obsolete locally signed sessions must not become Firebase sessions.
-  await (legacyCleanup ??= AsyncStorage.removeItem(TOKEN_KEY));
-  if (devAuthEnabled) {
-    developmentSession ??= AsyncStorage.getItem(DEVELOPMENT_SESSION_KEY).then(
-      (value) => value === "active",
-    );
-    return (await developmentSession) ? "fable-development" : null;
-  }
+  await (legacyCleanup ??= AsyncStorage.multiRemove([
+    TOKEN_KEY,
+    "fable_development_session",
+  ]));
   if (!firebaseConfigured) return null;
   const auth = getFirebaseAuth();
   await auth.authStateReady();
   const user = auth.currentUser;
   if (!user || !user.emailVerified) return null;
-  return user.getIdToken();
+  try {
+    return await user.getIdToken();
+  } catch (error) {
+    if (
+      error instanceof FirebaseError &&
+      [
+        "auth/user-disabled",
+        "auth/user-token-expired",
+        "auth/invalid-user-token",
+      ].includes(error.code)
+    ) {
+      await signOut(auth);
+      return null;
+    }
+    throw error;
+  }
 }
 
 export async function selectWorkspace(id: string | null): Promise<void> {
@@ -167,7 +182,7 @@ export async function request<T>(
     );
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
-      if (!devAuthEnabled) await signOut(getFirebaseAuth());
+      await signOut(getFirebaseAuth());
       await selectWorkspace(null);
     }
     throw error;
@@ -179,6 +194,14 @@ export interface AuthResponse {
 }
 export interface RegistrationResponse {
   verificationSent: true;
+}
+export class EmailVerificationRequiredError extends Error {
+  constructor(
+    message = "Verify your email using the link in your inbox before signing in.",
+  ) {
+    super(message);
+    this.name = "EmailVerificationRequiredError";
+  }
 }
 
 async function authenticate(
@@ -194,10 +217,7 @@ async function finishAuthentication(user: FirebaseUser): Promise<AuthResponse> {
   await reload(user);
   if (!user.emailVerified) {
     await signOut(getFirebaseAuth());
-    throw new ApiError(
-      "Verify your email using the link in your inbox before signing in.",
-      403,
-    );
+    throw new EmailVerificationRequiredError();
   }
   await user.getIdToken(true);
   await selectWorkspace(null);
@@ -208,25 +228,6 @@ async function finishAuthentication(user: FirebaseUser): Promise<AuthResponse> {
 }
 
 export const session = {
-  async startDevelopment(): Promise<AuthResponse> {
-    if (!devAuthEnabled)
-      throw new Error("Development authentication is disabled.");
-    await selectWorkspace(null);
-    const result = await requestJson<AuthResponse>(
-      `${getApiBaseUrl()}/auth/session`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer fable-development",
-        },
-        body: "{}",
-      },
-    );
-    await AsyncStorage.setItem(DEVELOPMENT_SESSION_KEY, "active");
-    developmentSession = Promise.resolve(true);
-    return result;
-  },
   async register(
     email: string,
     password: string,
@@ -237,6 +238,28 @@ export const session = {
     if (!name.trim() || name.trim().length > 80)
       throw new Error("Enter a name between 1 and 80 characters.");
     const auth = getFirebaseAuth();
+    const policy = await validatePassword(auth, password);
+    if (!policy.isValid) {
+      const requirements: string[] = [];
+      const strength = policy.passwordPolicy.customStrengthOptions;
+      if (policy.meetsMinPasswordLength === false)
+        requirements.push(`at least ${strength.minPasswordLength} characters`);
+      if (policy.meetsMaxPasswordLength === false)
+        requirements.push(`at most ${strength.maxPasswordLength} characters`);
+      if (policy.containsLowercaseLetter === false)
+        requirements.push("a lowercase letter");
+      if (policy.containsUppercaseLetter === false)
+        requirements.push("an uppercase letter");
+      if (policy.containsNumericCharacter === false)
+        requirements.push("a number");
+      if (policy.containsNonAlphanumericCharacter === false)
+        requirements.push("a special character");
+      throw new Error(
+        requirements.length
+          ? `Your password needs ${requirements.join(", ")}.`
+          : "Choose a password that meets the password policy.",
+      );
+    }
     const result = await createUserWithEmailAndPassword(
       auth,
       email.trim(),
@@ -246,6 +269,10 @@ export const session = {
       await updateProfile(result.user, { displayName: name.trim() });
       await sendEmailVerification(result.user);
       return { verificationSent: true };
+    } catch {
+      throw new EmailVerificationRequiredError(
+        "Your account was created, but we couldn't confirm the verification email was sent. Enter your email and password, then resend the verification link.",
+      );
     } finally {
       await signOut(auth);
     }
@@ -313,12 +340,7 @@ export const session = {
   async logout(): Promise<void> {
     // Normal sign-out affects this device. Server revocation is an explicit all-device action.
     try {
-      if (devAuthEnabled) {
-        developmentSession = Promise.resolve(false);
-        await AsyncStorage.removeItem(DEVELOPMENT_SESSION_KEY);
-      }
-      if (!devAuthEnabled && firebaseConfigured)
-        await signOut(getFirebaseAuth());
+      if (firebaseConfigured) await signOut(getFirebaseAuth());
     } finally {
       await selectWorkspace(null);
     }

@@ -6,6 +6,13 @@ import { AuthRequest } from "../lib/auth.js";
 import { accessibleChannel, channelScope, lockChannel } from "../lib/access.js";
 import { asyncRoute, HttpError, parse } from "../lib/http.js";
 import { createAuthenticatedLimiter } from "../lib/rateLimits.js";
+import {
+  prepareImage,
+  sendObject,
+  storeObject,
+  mediaCapacity,
+  mediaRoute,
+} from "../lib/storage.js";
 
 export const mediaRouter = Router();
 export const assetSelect = {
@@ -51,8 +58,9 @@ function detect(bytes: Buffer) {
 mediaRouter.post(
   "/:channelId",
   createAuthenticatedLimiter({ limit: 12 }),
+  mediaCapacity,
   express.raw({ type: "application/octet-stream", limit: "10mb" }),
-  asyncRoute(async (req: AuthRequest, res) => {
+  mediaRoute(async (req: AuthRequest, res) => {
     const { name } = parse(
       z
         .object({
@@ -71,12 +79,41 @@ mediaRouter.post(
     );
     if (!Buffer.isBuffer(req.body) || !req.body.length)
       throw new HttpError(400, "Upload a nonempty file up to 10 MB");
-    const bytes: Buffer = req.body;
+    let bytes: Buffer = req.body;
+    let mimeType = detect(bytes);
+    if (mimeType.startsWith("image/")) {
+      const image = await prepareImage(bytes);
+      bytes = image.bytes;
+      mimeType = image.mimeType;
+    }
+    if (bytes.length > 10 * 1024 * 1024)
+      throw new HttpError(413, "Prepared attachment exceeds 10 MB");
+    await accessibleChannel(req, req.params.channelId);
     const digest = createHash("sha256")
       .update(name)
       .update("\0")
       .update(bytes)
       .digest("hex");
+    const prior = await prisma.mediaAsset.findFirst({
+      where: {
+        ownerId: req.auth!.userId,
+        channelId: req.params.channelId,
+        digest,
+        messageId: null,
+      },
+      select: assetSelect,
+    });
+    if (prior) {
+      res.status(200).json({ data: prior });
+      return;
+    }
+    const usage = await prisma.mediaAsset.aggregate({
+      where: { ownerId: req.auth!.userId },
+      _sum: { size: true },
+    });
+    if ((usage._sum.size || 0) + bytes.length > 100 * 1024 * 1024)
+      throw new HttpError(413, "Your 100 MB media limit is reached");
+    const storageKey = await storeObject(bytes, mimeType);
     const asset = await prisma.$transaction(async (tx) => {
       await lockChannel(tx, req.params.channelId);
       const channel = await accessibleChannel(req, req.params.channelId, tx);
@@ -115,10 +152,10 @@ mediaRouter.post(
           channelId: channel.id,
           ownerId: req.auth!.userId,
           name,
-          mimeType: detect(bytes),
+          mimeType,
           size: bytes.length,
           digest,
-          bytes: new Uint8Array(bytes),
+          storageKey,
         },
         select: assetSelect,
       });
@@ -147,7 +184,10 @@ mediaRouter.get(
       `attachment; filename*=UTF-8''${encodeURIComponent(asset.name)}`,
     );
     res.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
-    res.send(Buffer.from(asset.bytes));
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    if (asset.storageKey) await sendObject(asset.storageKey, res);
+    else res.send(Buffer.from(asset.bytes!));
   }),
 );
 mediaRouter.delete(

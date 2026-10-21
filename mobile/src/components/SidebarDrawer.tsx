@@ -25,6 +25,7 @@ import { NavigationMenuButton } from "./NavigationDrawer";
 import { AppIcon } from "./ui/AppIcon";
 import { MotionPressable as Pressable } from "./ui/MotionPressable";
 import { UserAvatar } from "./ui/UserAvatar";
+import { subscribeRealtime } from "@/services/realtime";
 
 interface Props {
   currentUserId: string;
@@ -91,6 +92,26 @@ export function SidebarDrawer({
   const directory = showPeople ? people : rooms;
   const reloadRooms = rooms.reload;
   const reloadPeople = people.reload;
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = subscribeRealtime((event) => {
+      if (
+        event.type === "call.updated" ||
+        event.type === "groupcall.updated" ||
+        event.type === "settings.updated"
+      )
+        return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (showPeople) reloadPeople();
+        else reloadRooms();
+      }, 200);
+    });
+    return () => {
+      unsubscribe();
+      if (timer) clearTimeout(timer);
+    };
+  }, [showPeople, reloadRooms, reloadPeople]);
   useEffect(() => {
     const timer = setInterval(() => {
       if (AppState.currentState !== "active") return;
@@ -217,15 +238,6 @@ export function SidebarDrawer({
             )}
           </Pressable>
         )}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="New chat"
-          disabled={!canCreateChat}
-          onPress={onCreateChat}
-          style={[styles.iconButton, !canCreateChat && { opacity: 0.4 }]}
-        >
-          <AppIcon name="compose" size={26} />
-        </Pressable>
         <NavigationMenuButton onPress={onOpenNavigation} />
       </View>
       <View style={styles.search}>
@@ -245,43 +257,63 @@ export function SidebarDrawer({
           {personError}
         </Text>
       ) : null}
-      <FlatList<Row>
-        data={data}
-        keyExtractor={keyExtractor}
-        renderItem={renderItem}
-        initialNumToRender={16}
-        maxToRenderPerBatch={10}
-        windowSize={5}
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={styles.list}
-        ListHeaderComponent={
-          <DirectoryControls
-            label={showPeople ? "Search people" : "Search chats"}
-            query={directory.query}
-            onSearch={directory.search}
-            total={directory.page?.total}
-            loading={directory.loading}
-            error={directory.error}
-            onRetry={directory.reload}
-            canPrevious={directory.canPrevious}
-            hasMore={Boolean(directory.page?.hasMore)}
-            onPrevious={directory.previous}
-            onNext={directory.next}
-            onFirst={directory.first}
-            isFirst={directory.isFirst}
-            showSearch={false}
-          />
-        }
-        ListEmptyComponent={
-          !directory.loading && !directory.error ? (
-            <Text style={styles.empty}>
-              {showPeople
-                ? "No people match your search."
-                : "No conversations yet. Start one with the new chat button."}
-            </Text>
-          ) : null
-        }
-      />
+      <View style={styles.directory}>
+        <FlatList<Row>
+          data={data}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
+          initialNumToRender={16}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[styles.list, !showPeople && styles.chatList]}
+          ListHeaderComponent={
+            <DirectoryControls
+              label={showPeople ? "Search people" : "Search chats"}
+              query={directory.query}
+              onSearch={directory.search}
+              total={directory.page?.total}
+              loading={directory.loading}
+              error={directory.error}
+              onRetry={directory.reload}
+              canPrevious={directory.canPrevious}
+              hasMore={Boolean(directory.page?.hasMore)}
+              onPrevious={directory.previous}
+              onNext={directory.next}
+              onFirst={directory.first}
+              isFirst={directory.isFirst}
+              showSearch={false}
+            />
+          }
+          ListEmptyComponent={
+            !directory.loading && !directory.error ? (
+              <Text style={styles.empty}>
+                {showPeople
+                  ? "No people match your search."
+                  : "No chats yet. Tap New chat below to start a conversation."}
+              </Text>
+            ) : null
+          }
+        />
+        {!showPeople && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="New chat"
+            accessibilityHint="Choose a contact to start a conversation"
+            accessibilityState={{ disabled: !canCreateChat }}
+            disabled={!canCreateChat}
+            onPress={onCreateChat}
+            feedbackScale={0.96}
+            style={[
+              styles.newChatButton,
+              !canCreateChat && styles.newChatButtonDisabled,
+            ]}
+          >
+            <AppIcon name="compose" size={24} color={colors.onPrimary} />
+            <Text style={styles.newChatButtonLabel}>New chat</Text>
+          </Pressable>
+        )}
+      </View>
     </SafeAreaView>
   );
 }
@@ -318,6 +350,35 @@ const createStyles = (colors: BrutalPalette) =>
       minHeight: 44,
     },
     list: { paddingHorizontal: 10, paddingBottom: 16, flexGrow: 1 },
+    directory: { flex: 1 },
+    chatList: { paddingBottom: 96 },
+    newChatButton: {
+      position: "absolute",
+      right: 20,
+      bottom: 20,
+      zIndex: 1,
+      minHeight: 56,
+      paddingHorizontal: 18,
+      paddingVertical: 14,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+      borderRadius: 20,
+      backgroundColor: colors.primary,
+      shadowColor: "#000000",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.18,
+      shadowRadius: 10,
+      elevation: 5,
+    },
+    newChatButtonDisabled: { opacity: 0.4 },
+    newChatButtonLabel: {
+      fontFamily: Fonts.medium,
+      fontSize: 16,
+      lineHeight: 22,
+      color: colors.onPrimary,
+    },
     row: {
       flexDirection: "row",
       alignItems: "center",

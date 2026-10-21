@@ -160,8 +160,9 @@ export function ContactPickerModal({
             <SearchField
               inputRef={search}
               autoFocus={!photo}
-              accessibilityLabel="Search contacts by name or number"
-              placeholder="Search name or phone number"
+              accessibilityLabel="Search contacts by name, number or full email address"
+              placeholder="Name, number or email"
+              maxLength={254}
               value={query}
               onChangeText={setQuery}
               editable={!busy && !recipientLocked}

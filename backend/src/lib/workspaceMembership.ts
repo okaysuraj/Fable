@@ -1,4 +1,4 @@
-import { prisma } from "./prisma.js";
+import { prisma, sqlTable } from "./prisma.js";
 import { AuthRequest } from "./auth.js";
 import { HttpError } from "./http.js";
 import {
@@ -70,9 +70,9 @@ export async function removeWorkspaceMember(
           { reassigned: number; detached: number }[]
         >`
         WITH changed AS (
-          UPDATE "Channel" c SET "createdById" = (
-            SELECT cm."userId" FROM "ChannelMember" cm
-            INNER JOIN "WorkspaceMember" wm ON wm."userId" = cm."userId" AND wm."workspaceId" = c."workspaceId"
+          UPDATE ${sqlTable("Channel")} c SET "createdById" = (
+            SELECT cm."userId" FROM ${sqlTable("ChannelMember")} cm
+            INNER JOIN ${sqlTable("WorkspaceMember")} wm ON wm."userId" = cm."userId" AND wm."workspaceId" = c."workspaceId"
             WHERE cm."channelId" = c."id" AND cm."userId" <> ${userId}
             ORDER BY cm."createdAt" ASC, cm."userId" ASC LIMIT 1
           ), "updatedAt" = CURRENT_TIMESTAMP

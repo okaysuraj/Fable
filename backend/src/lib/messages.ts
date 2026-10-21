@@ -2,7 +2,7 @@
 import { Prisma } from "@prisma/client";
 import { AuthRequest } from "./auth.js";
 import { formatUser, isWorkspaceAdmin, publicUserSelect } from "./access.js";
-import { prisma } from "./prisma.js";
+import { prisma, sqlTable } from "./prisma.js";
 
 export const reactionIcons = [
   "sparkle",
@@ -80,7 +80,7 @@ export async function formatMessages(
       >(Prisma.sql`
     SELECT r."messageId", r."icon", count(*)::int AS "count",
       bool_or(r."userId" = ${req.auth!.userId}) AS "reactedByMe"
-    FROM "Reaction" r
+    FROM ${sqlTable("Reaction")} r
     WHERE r."messageId" IN (${Prisma.join(ids)}) AND r."icon" IN (${Prisma.join(reactionIcons)})
     GROUP BY r."messageId", r."icon" ORDER BY r."messageId", r."icon"
   `)

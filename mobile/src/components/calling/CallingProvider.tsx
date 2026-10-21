@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -17,18 +18,30 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Constants from "expo-constants";
+import { isRunningInExpoGo } from "expo";
 import { useReducedMotion } from "react-native-reanimated";
 import type {
   MediaStream,
   RTCPeerConnection,
   RTCView,
 } from "react-native-webrtc";
-import { api } from "@/services/api";
+import { api, ApiError } from "@/services/api";
 import type { CallSession } from "@/types/chat";
 import { useBrutalTheme } from "@/hooks/use-brutal-theme";
 import { AppIcon } from "../ui/AppIcon";
 import { MotionPressable as Pressable } from "../ui/MotionPressable";
+import { subscribeRealtime } from "@/services/realtime";
+import { CallAudioOutput, CallSwitchCamera } from "./CallDeviceControls";
+import {
+  initializeNativeCalls,
+  nativeOutgoing,
+  nativeConnected,
+  nativeEnd,
+  nativeMute,
+  showNativeIncoming,
+  subscribeNativeCalls,
+  pendingNativeCall,
+} from "@/services/nativeCalls";
 
 const Calling = createContext<{
   start: (id: string, kind: "audio" | "video", name: string) => void;
@@ -84,10 +97,13 @@ export function CallingProvider({
   const reduceMotion = useReducedMotion();
   const [call, setCall] = useState<CallSession | null>(null);
   const [phase, setPhaseState] = useState<Phase>("idle");
-  const setPhase = (value: Phase) => {
-    setPhaseState(value);
-    onActiveChange(value !== "idle");
-  };
+  const setPhase = useCallback(
+    (value: Phase) => {
+      setPhaseState(value);
+      onActiveChange(value !== "idle");
+    },
+    [onActiveChange],
+  );
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [local, setLocal] = useState<MediaStream | null>(null);
@@ -95,13 +111,33 @@ export function CallingProvider({
   const [Video, setVideo] = useState<typeof RTCView | null>(null);
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
+  const [frontCamera, setFrontCamera] = useState(true);
+  const cameraOffRef = useRef(cameraOff);
+  useLayoutEffect(() => {
+    cameraOffRef.current = cameraOff;
+  }, [cameraOff]);
   const callRef = useRef<CallSession | null>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const busy = useRef(false);
   const generation = useRef(0);
   const mounted = useRef(true);
+  const appliedOffer = useRef<string | null>(null);
+  const appliedAnswer = useRef<string | null>(null);
+  const restarting = useRef(false);
+  const repairAttempts = useRef(0);
+  const pollFailures = useRef(0);
+  const pollInFlight = useRef(false);
+  const repairTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const repairRef = useRef<() => Promise<void>>(async () => {});
   const cleanup = () => {
+    if (repairTimer.current) clearTimeout(repairTimer.current);
+    repairTimer.current = null;
+    appliedOffer.current = null;
+    appliedAnswer.current = null;
+    restarting.current = false;
+    repairAttempts.current = 0;
+    pollFailures.current = 0;
     peerRef.current?.close();
     peerRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -112,6 +148,7 @@ export function CallingProvider({
       setRemote(null);
       setMuted(false);
       setCameraOff(false);
+      setFrontCamera(true);
     }
   };
   const remember = (value: CallSession | null) => {
@@ -122,6 +159,7 @@ export function CallingProvider({
     generation.current += 1;
     busy.current = false;
     const current = callRef.current;
+    if (current) nativeEnd(current.nativeId);
     remember(null);
     cleanup();
     setPhase("idle");
@@ -151,10 +189,11 @@ export function CallingProvider({
   const prepare = async (kind: "audio" | "video", epoch: number) => {
     if (Platform.OS === "web")
       throw new Error("Use the Fable web app for browser calls.");
-    if (Constants.appOwnership === "expo")
+    if (isRunningInExpoGo())
       throw new Error(
         "Calling requires a Fable development build. Messaging works in Expo Go.",
       );
+    await initializeNativeCalls();
     let rtc: typeof import("react-native-webrtc");
     try {
       rtc = await import("react-native-webrtc");
@@ -171,11 +210,7 @@ export function CallingProvider({
           ? { facingMode: "user", width: 1280, height: 720, frameRate: 30 }
           : false,
     });
-    if (
-      !mounted.current ||
-      generation.current !== epoch ||
-      AppState.currentState !== "active"
-    ) {
+    if (!mounted.current || generation.current !== epoch) {
       stream.getTracks().forEach((t) => t.stop());
       stream.release();
       throw new Error("Call cancelled");
@@ -185,6 +220,7 @@ export function CallingProvider({
     setVideo(() => rtc.RTCView);
     const peer = new rtc.RTCPeerConnection({
       iceServers: config.data.iceServers,
+      iceTransportPolicy: config.data.iceTransportPolicy,
     });
     peerRef.current = peer;
     for (const track of stream.getTracks()) peer.addTrack(track, stream);
@@ -197,14 +233,20 @@ export function CallingProvider({
     });
     peer.addEventListener("connectionstatechange", () => {
       if (generation.current !== epoch || !mounted.current) return;
-      if (peer.connectionState === "connected") setPhase("connected");
-      else if (peer.connectionState === "disconnected") setPhase("connecting");
-      else if (peer.connectionState === "failed")
-        void fail(
-          new Error(
-            "Media connection failed. A TURN relay may be needed between these networks.",
-          ),
+      if (peer.connectionState === "connected") {
+        setPhase("connected");
+        repairAttempts.current = 0;
+      } else if (
+        peer.connectionState === "disconnected" ||
+        peer.connectionState === "failed"
+      ) {
+        setPhase("connecting");
+        if (repairTimer.current) clearTimeout(repairTimer.current);
+        repairTimer.current = setTimeout(
+          () => void repairRef.current(),
+          peer.connectionState === "failed" ? 0 : 2000,
         );
+      }
     });
     return peer;
   };
@@ -230,6 +272,11 @@ export function CallingProvider({
         return;
       }
       remember(result.data);
+      await nativeOutgoing(result.data, displayName);
+      if (generation.current !== epoch || !mounted.current) {
+        nativeEnd(result.data.nativeId);
+        return;
+      }
       setPhase("ringing");
     } catch (failure) {
       if (generation.current === epoch && mounted.current) await fail(failure);
@@ -250,11 +297,17 @@ export function CallingProvider({
       await peer.setLocalDescription(await peer.createAnswer());
       const description = await gather(peer);
       if (generation.current !== epoch) return;
-      const result = await api.updateCall(current.id, "answer", description);
+      const result = await api.updateCall(
+        current.id,
+        "answer",
+        description,
+        current.offerHash || undefined,
+      );
       if (generation.current !== epoch || !mounted.current) return;
       if (result.data.status !== "active")
         throw new Error("This call has already ended.");
       remember(result.data);
+      appliedOffer.current = current.offerHash;
       setPhase(
         peer.connectionState === "connected" ? "connected" : "connecting",
       );
@@ -264,9 +317,76 @@ export function CallingProvider({
       if (generation.current === epoch) busy.current = false;
     }
   };
+  const repair = async () => {
+    const current = callRef.current;
+    const peer = peerRef.current;
+    if (
+      !current ||
+      !peer ||
+      current.status !== "active" ||
+      busy.current ||
+      restarting.current
+    )
+      return;
+    if (repairAttempts.current >= 3) {
+      await fail(
+        new Error(
+          "The call couldn't reconnect. Check your connection and try calling again.",
+        ),
+      );
+      return;
+    }
+    repairAttempts.current += 1;
+    restarting.current = true;
+    busy.current = true;
+    const epoch = generation.current;
+    setPhase("connecting");
+    try {
+      if (current.callerId === userId) {
+        await peer.setLocalDescription(
+          await peer.createOffer({ iceRestart: true }),
+        );
+        const offer = await gather(peer);
+        const result = await api.updateCall(
+          current.id,
+          "restart",
+          offer,
+          current.offerHash || undefined,
+        );
+        if (mounted.current && generation.current === epoch)
+          remember(result.data);
+      } else {
+        const result = await api.updateCall(current.id, "request-restart");
+        if (mounted.current && generation.current === epoch)
+          remember(result.data);
+      }
+    } catch {
+      if (generation.current === epoch) restarting.current = false;
+    } finally {
+      if (generation.current === epoch) {
+        busy.current = false;
+        if (repairTimer.current) clearTimeout(repairTimer.current);
+        repairTimer.current = setTimeout(() => {
+          if (
+            restarting.current ||
+            peerRef.current?.connectionState !== "connected"
+          ) {
+            restarting.current = false;
+            void repairRef.current();
+          }
+        }, 15000);
+      }
+    }
+  };
   const pollRef = useRef<() => Promise<void>>(async () => {});
   const pollLatest = async () => {
-    if (AppState.currentState !== "active" || busy.current) return;
+    if (
+      (AppState.currentState !== "active" && !callRef.current) ||
+      busy.current
+    )
+      return;
+    if (pollInFlight.current) return;
+    pollInFlight.current = true;
     const current = callRef.current;
     const epoch = generation.current;
     try {
@@ -281,11 +401,18 @@ export function CallingProvider({
         )
           return;
         remember(result.data);
+        await showNativeIncoming({
+          callId: result.data.id,
+          nativeId: result.data.nativeId,
+          callerName: result.callerName || "Incoming call",
+          kind: result.data.kind,
+        });
         setPhase("incoming");
         setError("");
         setName(result.callerName || "Incoming call");
       } else {
         const result = await api.updateCall(current.id, "poll");
+        pollFailures.current = 0;
         if (
           !mounted.current ||
           callRef.current?.id !== current.id ||
@@ -293,6 +420,7 @@ export function CallingProvider({
         )
           return;
         if (["ended", "declined"].includes(result.data.status)) {
+          nativeEnd(current.nativeId);
           generation.current += 1;
           remember(null);
           cleanup();
@@ -304,15 +432,64 @@ export function CallingProvider({
         }
         const peer = peerRef.current;
         if (
+          peer &&
+          result.data.status === "active" &&
+          current.calleeId === userId &&
+          result.data.offer &&
+          result.data.offerHash !== appliedOffer.current
+        ) {
+          busy.current = true;
+          try {
+            await peer.setRemoteDescription({
+              type: "offer",
+              sdp: result.data.offer,
+            });
+            await peer.setLocalDescription(await peer.createAnswer());
+            const answer = await gather(peer);
+            const accepted = await api.updateCall(
+              current.id,
+              "answer",
+              answer,
+              result.data.offerHash || undefined,
+            );
+            if (!mounted.current || generation.current !== epoch) return;
+            appliedOffer.current = result.data.offerHash;
+            restarting.current = false;
+            if (repairTimer.current) clearTimeout(repairTimer.current);
+            remember(accepted.data);
+            setPhase(
+              peer.connectionState === "connected" ? "connected" : "connecting",
+            );
+            return;
+          } finally {
+            busy.current = false;
+          }
+        }
+        if (
+          peer &&
+          result.data.status === "active" &&
+          current.callerId === userId &&
+          !result.data.answer &&
+          peer.remoteDescription &&
+          !restarting.current
+        ) {
+          remember(result.data);
+          await repair();
+          return;
+        }
+        if (
           result.data.answer &&
           current.callerId === userId &&
           peer &&
-          !peer.remoteDescription
+          appliedAnswer.current !== result.data.answer
         ) {
           await peer.setRemoteDescription({
             type: "answer",
             sdp: result.data.answer,
           });
+          appliedAnswer.current = result.data.answer;
+          restarting.current = false;
+          if (repairTimer.current) clearTimeout(repairTimer.current);
           if (mounted.current && generation.current === epoch)
             setPhase(
               peer.connectionState === "connected" ? "connected" : "connecting",
@@ -321,15 +498,90 @@ export function CallingProvider({
         remember(result.data);
       }
     } catch (failure) {
-      if (mounted.current && current && generation.current === epoch)
-        await fail(failure);
+      if (mounted.current && current && generation.current === epoch) {
+        pollFailures.current += 1;
+        if (
+          pollFailures.current >= 3 ||
+          (failure instanceof ApiError &&
+            [401, 403, 404, 410].includes(failure.status))
+        )
+          await fail(failure);
+        else setPhase("connecting");
+      }
+    } finally {
+      pollInFlight.current = false;
     }
   };
   const failRef = useRef(fail);
+  const answerRef = useRef(answer);
+  const finishRef = useRef(finish);
   useLayoutEffect(() => {
     pollRef.current = pollLatest;
     failRef.current = fail;
+    answerRef.current = answer;
+    finishRef.current = finish;
+    repairRef.current = repair;
   });
+  useEffect(
+    () =>
+      subscribeRealtime((event) => {
+        if (event.type === "call.updated" || event.type === "ready")
+          void pollRef.current();
+      }),
+    [],
+  );
+  useEffect(
+    () =>
+      subscribeNativeCalls((action) => {
+        void (async () => {
+          let current = callRef.current;
+          if (
+            current &&
+            current.nativeId.toLowerCase() !== action.nativeId.toLowerCase()
+          )
+            return;
+          if (!current) {
+            current = await pendingNativeCall(action.nativeId);
+            if (
+              !current ||
+              current.calleeId !== userId ||
+              current.status !== "ringing"
+            ) {
+              if (action.type === "answer") nativeEnd(action.nativeId);
+              return;
+            }
+            remember(current);
+            setName("Incoming call");
+            setPhase("incoming");
+          }
+          if (action.type === "answer") await answerRef.current();
+          if (action.type === "end")
+            await finishRef.current(
+              current.status === "ringing" && current.calleeId === userId
+                ? "decline"
+                : "end",
+            );
+          if (action.type === "mute") {
+            streamRef.current?.getAudioTracks().forEach((track) => {
+              track.enabled = !action.muted;
+            });
+            setMuted(action.muted ?? false);
+          }
+        })().catch((failure: unknown) => {
+          void failRef.current(failure);
+        });
+      }),
+    [userId, setPhase],
+  );
+  useEffect(() => {
+    const current = callRef.current;
+    if (phase === "connected" && current)
+      void nativeConnected(current, current.callerId === userId).catch(
+        (failure: unknown) => {
+          void failRef.current(failure);
+        },
+      );
+  }, [phase, userId]);
   useEffect(() => {
     mounted.current = true;
     let polling = false;
@@ -345,15 +597,17 @@ export function CallingProvider({
     void poll();
     const timer = setInterval(() => void poll(), 3000);
     const subscription = AppState.addEventListener("change", (state) => {
-      // Background calling needs OS call integration; stop capture explicitly for this foreground implementation.
-      if (
-        state === "background" &&
-        (callRef.current || streamRef.current || busy.current)
-      )
-        void failRef.current(
-          new Error("Call stopped when Fable went into the background."),
-        );
-      else if (state === "active") void poll();
+      // Audio continues through the system call service; camera capture pauses offscreen.
+      if (state === "background")
+        streamRef.current?.getVideoTracks().forEach((track) => {
+          track.enabled = false;
+        });
+      else if (state === "active") {
+        streamRef.current?.getVideoTracks().forEach((track) => {
+          track.enabled = !cameraOffRef.current;
+        });
+        void poll();
+      }
     });
     return () => {
       mounted.current = false;
@@ -362,6 +616,7 @@ export function CallingProvider({
       clearInterval(timer);
       subscription.remove();
       const current = callRef.current;
+      if (current) nativeEnd(current.nativeId);
       callRef.current = null;
       cleanup();
       if (current)
@@ -449,7 +704,7 @@ export function CallingProvider({
             {Video && local && call?.kind === "video" && (
               <Video
                 streamURL={local.toURL()}
-                mirror
+                mirror={frontCamera}
                 objectFit="cover"
                 style={styles.local}
               />
@@ -490,6 +745,8 @@ export function CallingProvider({
                           t.enabled = muted;
                         });
                         setMuted(!muted);
+                        if (callRef.current)
+                          nativeMute(callRef.current.nativeId, !muted);
                       }}
                     >
                       <AppIcon
@@ -526,6 +783,13 @@ export function CallingProvider({
                         {cameraOff ? "Camera on" : "Camera off"}
                       </Text>
                     </Pressable>
+                  )}
+                  {local && <CallAudioOutput nativeId={call?.nativeId} />}
+                  {local && call?.kind === "video" && !cameraOff && (
+                    <CallSwitchCamera
+                      stream={local}
+                      onSwitched={() => setFrontCamera((value) => !value)}
+                    />
                   )}
                   <Pressable
                     accessibilityRole="button"

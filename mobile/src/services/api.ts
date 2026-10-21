@@ -21,6 +21,7 @@ export {
   getSessionToken,
   onSessionExpired,
   getApiBaseUrl,
+  EmailVerificationRequiredError,
 } from "./session";
 export type { AuthResponse, RegistrationResponse } from "./session";
 
@@ -93,11 +94,38 @@ function directoryQuery(options: DirectoryOptions = {}) {
 }
 
 export const api = {
+  fetchGlobalProfiles: async (ids: string[]) =>
+    (
+      await request<{ data: User[] }>(
+        `/contacts/profiles?ids=${encodeURIComponent(ids.join(","))}`,
+      )
+    ).data,
+  notificationPreference: async (channelId: string) =>
+    (
+      await request<{ data: { muted: boolean } }>(
+        `/devices/conversation/${encodeURIComponent(channelId)}`,
+      )
+    ).data,
+  setNotificationPreference: async (channelId: string, muted: boolean) =>
+    (
+      await request<{ data: { muted: boolean } }>(
+        `/devices/conversation/${encodeURIComponent(channelId)}`,
+        { method: "PUT", body: JSON.stringify({ muted }) },
+      )
+    ).data,
   matchContacts: async (numbers: string[], signal?: AbortSignal) =>
     (
       await request<{ data: User[] }>("/contacts/match", {
         method: "POST",
         body: JSON.stringify({ numbers }),
+        signal,
+      })
+    ).data,
+  findContactByEmail: async (email: string, signal?: AbortSignal) =>
+    (
+      await request<{ data: User[] }>("/contacts/lookup-email", {
+        method: "POST",
+        body: JSON.stringify({ email }),
         signal,
       })
     ).data,
@@ -171,6 +199,7 @@ export const api = {
   callConfig: () =>
     request<{
       data: {
+        iceTransportPolicy: "all" | "relay";
         iceServers: {
           urls: string | string[];
           username?: string;
@@ -189,12 +218,18 @@ export const api = {
     }),
   updateCall: (
     id: string,
-    action: "poll" | "answer" | "end" | "decline",
+    action:
+      "poll" | "answer" | "end" | "decline" | "restart" | "request-restart",
     answer?: string,
+    offerHash?: string,
   ) =>
     request<{ data: CallSession }>(`/calls/${encodeURIComponent(id)}`, {
       method: "POST",
-      body: JSON.stringify({ action, answer }),
+      body: JSON.stringify({
+        action,
+        ...(action === "restart" ? { offer: answer } : { answer }),
+        ...(offerHash ? { offerHash } : {}),
+      }),
     }),
   ...session,
   selectWorkspace,

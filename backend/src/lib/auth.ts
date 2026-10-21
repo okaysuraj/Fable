@@ -1,14 +1,11 @@
-/** Resolve Firebase or explicitly enabled development identity, then current database membership. */
+/** Verify Firebase identity, then resolve current database membership. */
 import { Request, Response, NextFunction } from "express";
-import { getFirebaseAuth } from "./firebase.js";
+import {
+  verifyFirebaseIdentity,
+  FirebaseIdentityError,
+  type VerifiedIdentity,
+} from "./firebase.js";
 import { prisma } from "./prisma.js";
-import { config } from "./config.js";
-
-interface Identity {
-  uid: string;
-  email: string;
-  name?: string;
-}
 
 export interface AuthPayload {
   accountId: string;
@@ -20,7 +17,7 @@ export interface AuthPayload {
 }
 export interface AuthRequest extends Request {
   auth?: AuthPayload;
-  identity?: Identity;
+  identity?: VerifiedIdentity;
 }
 
 export async function requireIdentity(
@@ -30,65 +27,17 @@ export async function requireIdentity(
 ): Promise<void> {
   const header = req.headers.authorization;
   if (!header || !/^Bearer \S+$/.test(header)) {
-    res.status(401).json({ error: "Authentication required" });
-    return;
-  }
-  if (config.devIdentity) {
-    // This marker is deliberately public; it works only on an explicitly opted-in development API.
-    if (header !== "Bearer fable-development") {
-      res.status(401).json({ error: "Use the local development session" });
-      return;
-    }
-    req.identity = config.devIdentity;
-    next();
-    return;
-  }
-  if (header === "Bearer fable-development") {
-    res.status(401).json({ error: "Development authentication is disabled" });
+    res
+      .status(401)
+      .json({ code: "AUTH_REQUIRED", error: "Authentication required" });
     return;
   }
   try {
-    const identity = await getFirebaseAuth().verifyIdToken(
-      header.slice(7),
-      true,
-    );
-    if (
-      !["password", "google.com"].includes(identity.firebase.sign_in_provider)
-    ) {
-      res.status(403).json({
-        code: "AUTH_PROVIDER_UNSUPPORTED",
-        error: "Sign in with email/password or Google",
-      });
-      return;
-    }
-    if (!identity.email_verified || !identity.email) {
-      res.status(403).json({
-        code: "EMAIL_VERIFICATION_REQUIRED",
-        error: "Verify your email before accessing Fable",
-      });
-      return;
-    }
-    req.identity = {
-      uid: identity.uid,
-      email: identity.email,
-      name: identity.name,
-    };
+    req.identity = await verifyFirebaseIdentity(header.slice(7));
     next();
   } catch (error) {
-    const code = (error as { code?: string }).code || "";
-    if (
-      [
-        "auth/id-token-expired",
-        "auth/id-token-revoked",
-        "auth/invalid-id-token",
-        "auth/argument-error",
-        "auth/user-disabled",
-        "auth/user-not-found",
-      ].includes(code)
-    ) {
-      res
-        .status(401)
-        .json({ error: "Invalid or expired authentication session" });
+    if (error instanceof FirebaseIdentityError) {
+      res.status(error.status).json({ code: error.code, error: error.message });
       return;
     }
     next(error);
@@ -146,9 +95,11 @@ async function attachDatabaseIdentity(
     const personalRoute =
       req.baseUrl === "/api/auth" ||
       req.baseUrl === "/api/settings" ||
+      req.baseUrl === "/api/devices" ||
+      req.baseUrl === "/api/group-calls" ||
       req.baseUrl === "/api/contacts" ||
       (req.baseUrl === "/api/calls" &&
-        ((req.method === "GET" && req.path === "/incoming") ||
+        (req.method === "GET" ||
           (req.method === "POST" && /^\/[^/]+$/.test(workspacePath)))) ||
       (req.baseUrl === "/api/channels" &&
         ((req.method === "POST" && req.path === "/groups") ||

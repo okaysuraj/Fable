@@ -1,6 +1,7 @@
 /** One Prisma client owns each process pool; migrations are an explicit operator command. */
-import { PrismaClient } from "@prisma/client";
-import "./config.js";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { config } from "./config.js";
+import { quoteIdentifier } from "../../config/database.mjs";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -13,10 +14,18 @@ export const prisma =
     // Prisma's automatic error logging can include invocation/query arguments.
     // The API boundary records only safe error metadata and a request ID.
     log: process.env.NODE_ENV === "development" ? ["warn"] : [],
+    transactionOptions: { maxWait: 10000, timeout: 15000 },
   });
 
 if (process.env.NODE_ENV !== "production") {
   global.__prisma = prisma;
+}
+
+/** Raw SQL must not depend on a transaction pool retaining SET search_path. */
+export function sqlTable(name: string): Prisma.Sql {
+  return Prisma.raw(
+    `${quoteIdentifier(config.database.schema)}.${quoteIdentifier(name)}`,
+  );
 }
 
 /**

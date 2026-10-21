@@ -1,4 +1,4 @@
-/** Address-book matching accepts numbers only; it never stores the uploaded address book. */
+/** Discover contacts by address-book number or exact email without storing the address book. */
 import { Router } from "express";
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -8,8 +8,66 @@ import { asyncRoute, HttpError, parse } from "../lib/http.js";
 import { lockWorkspace, publicUserSelect, formatUser } from "../lib/access.js";
 import { createAuthenticatedLimiter } from "../lib/rateLimits.js";
 import { channelSelect, formatChannels } from "./channels.js";
+import { sendProfilePhoto } from "../lib/profilePhoto.js";
 
 export const contactsRouter = Router();
+const visibleProfile = (userId: string) => ({
+  OR: [
+    { id: userId },
+    { memberships: { some: { workspace: { members: { some: { userId } } } } } },
+  ],
+});
+contactsRouter.get(
+  "/profiles",
+  asyncRoute(async (req: AuthRequest, res) => {
+    const ids = parse(
+      z
+        .string()
+        .max(6500)
+        .transform((value) => value.split(","))
+        .pipe(z.array(z.string().min(1).max(128)).max(50)),
+      req.query.ids,
+    );
+    const users = await prisma.user.findMany({
+      where: { AND: [{ id: { in: ids } }, visibleProfile(req.auth!.userId)] },
+      select: publicUserSelect,
+    });
+    res.json({ data: users.map(formatUser) });
+  }),
+);
+contactsRouter.get(
+  "/profiles/:id/photo",
+  asyncRoute(async (req: AuthRequest, res) => {
+    await sendProfilePhoto(
+      req.params.id,
+      res,
+      visibleProfile(req.auth!.userId),
+    );
+  }),
+);
+contactsRouter.post(
+  "/lookup-email",
+  createAuthenticatedLimiter({ limit: 20 }),
+  asyncRoute(async (req: AuthRequest, res) => {
+    const { email } = parse(
+      z
+        .object({ email: z.string().trim().max(254).email().toLowerCase() })
+        .strict(),
+      req.body,
+    );
+    // An exact indexed lookup avoids exposing a directory of sign-in addresses.
+    // Only provisioned Firebase accounts are discoverable; private fields stay out of the DTO.
+    const account = await prisma.account.findFirst({
+      where: {
+        email,
+        firebaseUid: { not: null },
+        userId: { not: req.auth!.userId },
+      },
+      select: { user: { select: publicUserSelect } },
+    });
+    res.json({ data: account ? [formatUser(account.user)] : [] });
+  }),
+);
 contactsRouter.post(
   "/match",
   createAuthenticatedLimiter({ limit: 12 }),

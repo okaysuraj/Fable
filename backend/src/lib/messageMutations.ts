@@ -4,6 +4,7 @@ import { AuthRequest } from "./auth.js";
 import { HttpError } from "./http.js";
 import { channelScope, lockChannel } from "./access.js";
 import { formatMessages, messageInclude } from "./messages.js";
+import { emitChannel, lockEventOrder } from "./events.js";
 
 type CodeSnippet = { language: string; code: string };
 type MessageMutation =
@@ -26,6 +27,7 @@ export async function mutateMessage(req: AuthRequest, input: MessageMutation) {
   });
   if (!target) throw new HttpError(404, "Message not found");
   return prisma.$transaction(async (tx) => {
+    await lockEventOrder(tx);
     await lockChannel(tx, target.channelId);
     const message = await tx.message.findFirst({
       where: { id: req.params.id, channel: channelScope(req) },
@@ -134,6 +136,10 @@ export async function mutateMessage(req: AuthRequest, input: MessageMutation) {
     });
     await tx.messageChange.create({
       data: { channelId: message.channelId, messageId: message.id },
+    });
+    await emitChannel(tx, message.channelId, {
+      type: "message.updated",
+      targetId: message.id,
     });
     return (await formatMessages([updated], req, tx))[0];
   });

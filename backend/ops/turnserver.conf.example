@@ -1,0 +1,34 @@
+# Operator-owned relay. Copy to an ignored .conf file and supply your domain, addresses and secrets.
+# TURN_SHARED_SECRET in backend/.env must match static-auth-secret here.
+listening-port=3478
+tls-listening-port=5349
+min-port=49160
+max-port=49260
+fingerprint
+use-auth-secret
+static-auth-secret=REPLACE_WITH_A_RANDOM_SECRET_OF_AT_LEAST_32_CHARACTERS
+realm=turn.YOUR_DOMAIN
+server-name=turn.YOUR_DOMAIN
+# external-ip=YOUR_PUBLIC_IP/YOUR_PRIVATE_IP
+cert=/secure/path/fullchain.pem
+pkey=/secure/path/privkey.pem
+# Current coturn disables TLS 1.0/1.1 by default. Do not enable tlsv1/tlsv1_1.
+no-cli
+no-multicast-peers
+no-tcp-relay
+pidfile=/tmp/turnserver.pid
+stale-nonce=600
+user-quota=8
+total-quota=1000
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+denied-peer-ip=224.0.0.0-255.255.255.255
+denied-peer-ip=::1
+denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+# Allow UDP/TCP 3478, TCP 5349, and UDP/TCP 49160..49260 at the host firewall.
+# A dedicated TURN host can use TLS 443 for restrictive networks (update TURN_URLS too).

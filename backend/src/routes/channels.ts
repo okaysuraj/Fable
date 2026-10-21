@@ -2,7 +2,7 @@ import { Router } from "express";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { prisma } from "../lib/prisma.js";
+import { prisma, sqlTable } from "../lib/prisma.js";
 import { AuthRequest } from "../lib/auth.js";
 import { asyncRoute, HttpError, parse } from "../lib/http.js";
 import {
@@ -44,13 +44,13 @@ export async function formatChannels(
     { id: string; memberCount: number; unreadCount: number; joined: boolean }[]
   >(Prisma.sql`
     SELECT c."id",
-      (CASE WHEN c."isPrivate" THEN (SELECT count(*) FROM "ChannelMember" cm WHERE cm."channelId" = c."id")
-        ELSE (SELECT count(*) FROM "WorkspaceMember" wm WHERE wm."workspaceId" = c."workspaceId") END)::int AS "memberCount",
-      EXISTS(SELECT 1 FROM "ChannelMember" cm WHERE cm."channelId" = c."id" AND cm."userId" = ${req.auth!.userId}) AS "joined",
-      (SELECT count(*) FROM "Message" m WHERE m."channelId" = c."id" AND m."deletedAt" IS NULL AND m."senderId" <> ${req.auth!.userId}
-        AND (m."createdAt" > COALESCE((SELECT cm."lastReadAt" FROM "ChannelMember" cm WHERE cm."channelId" = c."id" AND cm."userId" = ${req.auth!.userId}), c."createdAt")
-          OR EXISTS(SELECT 1 FROM "ChannelMember" cm WHERE cm."channelId" = c."id" AND cm."userId" = ${req.auth!.userId} AND cm."lastReadMessageId" IS NOT NULL AND m."createdAt" = cm."lastReadAt" AND m."id" > cm."lastReadMessageId")))::int AS "unreadCount"
-    FROM "Channel" c WHERE c."id" IN (${Prisma.join(channels.map((channel) => channel.id))})
+      (CASE WHEN c."isPrivate" THEN (SELECT count(*) FROM ${sqlTable("ChannelMember")} cm WHERE cm."channelId" = c."id")
+        ELSE (SELECT count(*) FROM ${sqlTable("WorkspaceMember")} wm WHERE wm."workspaceId" = c."workspaceId") END)::int AS "memberCount",
+      EXISTS(SELECT 1 FROM ${sqlTable("ChannelMember")} cm WHERE cm."channelId" = c."id" AND cm."userId" = ${req.auth!.userId}) AS "joined",
+      (SELECT count(*) FROM ${sqlTable("Message")} m WHERE m."channelId" = c."id" AND m."deletedAt" IS NULL AND m."senderId" <> ${req.auth!.userId}
+        AND (m."createdAt" > COALESCE((SELECT cm."lastReadAt" FROM ${sqlTable("ChannelMember")} cm WHERE cm."channelId" = c."id" AND cm."userId" = ${req.auth!.userId}), c."createdAt")
+          OR EXISTS(SELECT 1 FROM ${sqlTable("ChannelMember")} cm WHERE cm."channelId" = c."id" AND cm."userId" = ${req.auth!.userId} AND cm."lastReadMessageId" IS NOT NULL AND m."createdAt" = cm."lastReadAt" AND m."id" > cm."lastReadMessageId")))::int AS "unreadCount"
+    FROM ${sqlTable("Channel")} c WHERE c."id" IN (${Prisma.join(channels.map((channel) => channel.id))})
   `);
   const byId = new Map(metrics.map((metric) => [metric.id, metric]));
   const memberships = await db.workspaceMember.findMany({
@@ -623,7 +623,7 @@ channelsRouter.post(
       )
         return;
       await tx.$executeRaw`
-      INSERT INTO "ChannelMember" ("channelId", "userId", "lastReadAt", "lastReadMessageId") VALUES (${channel.id}, ${req.auth!.userId}, ${lastReadAt}, ${messageId || null})
+      INSERT INTO ${sqlTable("ChannelMember")} ("channelId", "userId", "lastReadAt", "lastReadMessageId") VALUES (${channel.id}, ${req.auth!.userId}, ${lastReadAt}, ${messageId || null})
       ON CONFLICT ("channelId", "userId") DO UPDATE SET
         "lastReadMessageId" = CASE
           WHEN EXCLUDED."lastReadAt" > "ChannelMember"."lastReadAt" THEN EXCLUDED."lastReadMessageId"

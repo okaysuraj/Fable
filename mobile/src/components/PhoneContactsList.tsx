@@ -11,6 +11,7 @@ import {
   usePhoneContacts,
   type PhoneContact,
 } from "@/hooks/use-phone-contacts";
+import { useEmailContactSearch } from "@/hooks/use-email-contact-search";
 import { useBrutalTheme } from "@/hooks/use-brutal-theme";
 import { Fonts } from "@/constants/theme";
 import { AppIcon } from "./ui/AppIcon";
@@ -37,7 +38,12 @@ export function PhoneContactsList({
 }) {
   const colors = useBrutalTheme();
   const contacts = usePhoneContacts(ownNumber);
-  const { loading, hasMore, error, loadMore } = contacts;
+  const emailSearch = useEmailContactSearch(query);
+  const emailMode = emailSearch.active;
+  const loading = emailMode ? emailSearch.loading : contacts.loading;
+  const error = emailMode ? emailSearch.error : contacts.error;
+  const hasMore = !emailMode && contacts.hasMore;
+  const { loadMore } = contacts;
   useEffect(() => {
     if (!query.trim() || loading || !hasMore || error) return;
     const timer = setTimeout(() => void loadMore(), 120);
@@ -52,13 +58,18 @@ export function PhoneContactsList({
   }, [contacts.loading, onReady]);
   const term = query.trim().toLocaleLowerCase();
   const numberTerm = query.replace(/[^\d+]/g, "");
-  const rows = contacts.contacts.filter(
-    (person) =>
-      !term ||
-      person.contactName.toLocaleLowerCase().includes(term) ||
-      person.name.toLocaleLowerCase().includes(term) ||
-      (numberTerm && person.phoneNumber?.includes(numberTerm)),
-  );
+  const rows: PhoneContact[] = emailMode
+    ? emailSearch.people.map((person) => ({
+        ...person,
+        contactName: person.name,
+      }))
+    : contacts.contacts.filter(
+        (person) =>
+          !term ||
+          person.contactName.toLocaleLowerCase().includes(term) ||
+          person.name.toLocaleLowerCase().includes(term) ||
+          (numberTerm && person.phoneNumber?.includes(numberTerm)),
+      );
   return (
     <FlatList
       data={rows}
@@ -70,8 +81,7 @@ export function PhoneContactsList({
       maxToRenderPerBatch={12}
       windowSize={5}
       onEndReached={() => {
-        if (contacts.hasMore && !contacts.loading && !contacts.error)
-          void contacts.loadMore();
+        if (hasMore && !loading && !error) void loadMore();
       }}
       onEndReachedThreshold={0.5}
       renderItem={({ item }) => (
@@ -106,7 +116,9 @@ export function PhoneContactsList({
               numberOfLines={1}
               style={[styles.detail, { color: colors.inkMuted }]}
             >
-              {item.name} · {item.phoneNumber}
+              {emailMode
+                ? "Found by email"
+                : `${item.name} · ${item.phoneNumber}`}
             </Text>
           </View>
           <AppIcon
@@ -125,21 +137,29 @@ export function PhoneContactsList({
         </MotionPressable>
       )}
       ListEmptyComponent={
-        !contacts.loading && !contacts.error ? (
+        !loading && !error ? (
           <View style={styles.empty}>
-            <AppIcon name="people" size={38} />
+            <AppIcon name={emailMode ? "mail" : "people"} size={38} />
             <Text style={[styles.name, { color: colors.ink }]}>
-              {contacts.hasMore
-                ? "Searching your contacts…"
-                : query
-                  ? "No matching contacts"
-                  : "Your contacts on Fable"}
+              {emailMode
+                ? emailSearch.valid
+                  ? "No account found"
+                  : "Find someone by email"
+                : hasMore
+                  ? "Searching your contacts…"
+                  : query
+                    ? "No matching contacts"
+                    : "Your contacts on Fable"}
             </Text>
             <Text style={[styles.copy, { color: colors.inkMuted }]}>
-              {contacts.hasMore
-                ? "Load more contacts to keep looking."
-                : "Contacts appear here when their Fable profile has a matching phone number."}
-              {!ownNumber
+              {emailMode
+                ? emailSearch.valid
+                  ? "No other Fable account matches this email address."
+                  : "Enter a complete email address to find someone on Fable."
+                : hasMore
+                  ? "Load more contacts to keep looking."
+                  : "Find phone contacts on Fable, or enter someone's full email address above."}
+              {!emailMode && !ownNumber
                 ? " Add your number with its country code in Your Profile to match local-format numbers."
                 : ""}
             </Text>
@@ -148,33 +168,49 @@ export function PhoneContactsList({
       }
       ListFooterComponent={
         <View style={styles.footer}>
-          {contacts.loading ? (
-            <ActivityIndicator color={colors.primary} />
+          {loading ? (
+            <ActivityIndicator
+              color={colors.primary}
+              accessibilityLabel={
+                emailMode ? "Searching by email" : "Loading contacts"
+              }
+            />
           ) : null}
-          {contacts.error ? (
+          {error ? (
             <>
               <Text
                 accessibilityRole="alert"
                 style={[styles.copy, { color: colors.dangerButton }]}
               >
-                {contacts.error}
+                {error}
               </Text>
               <BrutalButton
                 title={
-                  contacts.denied ? "Open phone settings" : "Retry contacts"
+                  emailMode
+                    ? "Retry email search"
+                    : contacts.denied
+                      ? "Open phone settings"
+                      : "Retry contacts"
                 }
                 variant="outline"
                 onPress={() => {
-                  if (contacts.denied) void Linking.openSettings();
-                  else void contacts.loadMore();
+                  if (emailMode) emailSearch.retry();
+                  else if (contacts.denied) void Linking.openSettings();
+                  else void loadMore();
                 }}
               />
+              {!emailMode && contacts.denied ? (
+                <Text style={[styles.copy, { color: colors.inkMuted }]}>
+                  You can also enter a full email address above without allowing
+                  contacts access.
+                </Text>
+              ) : null}
             </>
-          ) : !contacts.loading && contacts.hasMore ? (
+          ) : !loading && hasMore ? (
             <BrutalButton
               title="Load more contacts"
               variant="outline"
-              onPress={() => void contacts.loadMore()}
+              onPress={() => void loadMore()}
             />
           ) : null}
         </View>

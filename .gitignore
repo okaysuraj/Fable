@@ -1,5 +1,13 @@
 # Dependencies
 node_modules/
+backend/data/
+backend/ops/*.conf
+backend/ops/generated/
+backend/credentials/
+*firebase-adminsdk*.json
+/google-services.json
+mobile/google-services.json
+mobile/GoogleService-Info.plist
 .pnp
 .pnp.js
 

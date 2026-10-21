@@ -1,32 +1,19 @@
 /** Validate server-only configuration at startup; never log connection URLs or credentials. */
 import "dotenv/config";
-import { createHash } from "node:crypto";
-import { z } from "zod";
+import { isIP } from "node:net";
+import { databaseEnvironment } from "../../config/database.mjs";
+import { callingEnvironment } from "../../config/calling.mjs";
 
 const production = process.env.NODE_ENV === "production";
-const devAuthEnabled = process.env.DEV_AUTH_ENABLED === "true";
-if (devAuthEnabled && process.env.NODE_ENV !== "development")
-  throw new Error("DEV_AUTH_ENABLED is only allowed with NODE_ENV=development");
-const devProfile = devAuthEnabled
-  ? z
-      .object({
-        email: z.email().max(254),
-        name: z.string().trim().min(1).max(80),
-      })
-      .parse({
-        email: (process.env.DEV_AUTH_EMAIL || "developer@fable.local")
-          .trim()
-          .toLowerCase(),
-        name: process.env.DEV_AUTH_NAME || "Local developer",
-      })
-  : undefined;
 if (production && !process.env.FRONTEND_URL)
   throw new Error("Production FRONTEND_URL must be explicitly configured");
 if (
   production &&
   (!process.env.FIREBASE_PROJECT_ID ||
     process.env.FIREBASE_PROJECT_ID.startsWith("demo-") ||
-    process.env.FIREBASE_PROJECT_ID === "your-firebase-project-id")
+    /REPLACE_WITH|^your[-_]|^placeholder(?:[-_]|$)|^mock(?:[-_]|$)/i.test(
+      process.env.FIREBASE_PROJECT_ID,
+    ))
 )
   throw new Error(
     "Production FIREBASE_PROJECT_ID must identify the real Firebase project",
@@ -63,61 +50,17 @@ for (const origin of origins) {
   if (production && parsed.protocol !== "https:")
     throw new Error("Production frontend origins must use HTTPS");
 }
-if (production) {
-  let database: URL;
-  try {
-    database = new URL(process.env.DATABASE_URL || "");
-  } catch {
-    throw new Error("Production DATABASE_URL must be configured");
-  }
-  if (
-    !["postgres:", "postgresql:"].includes(database.protocol) ||
-    !database.hostname ||
-    !database.pathname.slice(1) ||
-    !database.username ||
-    !database.password
-  )
-    throw new Error(
-      "Production DATABASE_URL must be a complete PostgreSQL connection URL",
-    );
-  if (database.searchParams.get("sslmode") !== "require")
-    throw new Error(
-      "Production Prisma PostgreSQL connections require sslmode=require",
-    );
-  if (database.searchParams.get("sslaccept") !== "strict")
-    throw new Error(
-      "Production Prisma PostgreSQL connections require sslaccept=strict for certificate verification",
-    );
-  for (const [key, fallback, maximum] of [
-    ["connection_limit", 5, 50],
-    ["pool_timeout", 10, 60],
-    ["socket_timeout", 15, 60],
-  ] as const) {
-    const value = database.searchParams.get(key);
-    if (value === null) database.searchParams.set(key, String(fallback));
-    else if (
-      !/^\d+$/.test(value) ||
-      Number(value) < 1 ||
-      Number(value) > maximum
-    )
-      throw new Error(
-        `Production ${key} must be 1..${maximum}; zero/unbounded values are not allowed`,
-      );
-  }
-  // Small bounded defaults are appropriate for the single-instance hobby release.
-  // This is server-only configuration; URLs are never written to logs or clients.
-  process.env.DATABASE_URL = database.toString();
-}
+const database = databaseEnvironment();
+process.env.DATABASE_URL = database.runtimeUrl;
+process.env.DIRECT_DATABASE_URL = database.directUrl;
 export const config = {
   production,
-  devIdentity: devProfile
-    ? {
-        ...devProfile,
-        uid: `fable-development:${createHash("sha256").update(devProfile.email).digest("hex")}`,
-      }
-    : undefined,
   port: Number(process.env.PORT || 5000),
+  host: process.env.HOST?.trim() || "0.0.0.0",
   origins,
+  database,
+  calling: callingEnvironment(),
 };
 if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535)
   throw new Error("PORT must be an integer between 1 and 65535");
+if (!isIP(config.host)) throw new Error("HOST must be a listening IP address");

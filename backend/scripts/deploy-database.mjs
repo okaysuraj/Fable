@@ -3,40 +3,12 @@ import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
+import { databaseEnvironment } from "../config/database.mjs";
 
 const backendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 dotenv.config({ path: resolve(backendRoot, ".env") });
-const direct = process.env.DIRECT_DATABASE_URL;
-if (!direct)
-  throw new Error(
-    "Set DIRECT_DATABASE_URL to the direct PostgreSQL migration connection. Runtime DATABASE_URL is never used as a migration fallback.",
-  );
-let database;
-try {
-  database = new URL(direct);
-} catch {
-  throw new Error("DIRECT_DATABASE_URL is invalid.");
-}
-if (
-  !["postgres:", "postgresql:"].includes(database.protocol) ||
-  !database.hostname ||
-  !database.pathname.slice(1)
-)
-  throw new Error("DIRECT_DATABASE_URL must identify a PostgreSQL database.");
-if (database.hostname.includes("-pooler."))
-  throw new Error(
-    "Use the direct Neon hostname, not the transaction-pooler hostname, for migration deployment.",
-  );
-const local = ["localhost", "127.0.0.1", "[::1]"].includes(database.hostname);
-if (
-  !local &&
-  (database.searchParams.get("sslmode") !== "require" ||
-    database.searchParams.get("sslaccept") !== "strict")
-)
-  throw new Error(
-    "Remote migration connections require sslmode=require and sslaccept=strict.",
-  );
+const database = databaseEnvironment();
 console.info(
   "Deploying reviewed migrations through the explicitly configured direct connection.",
 );
@@ -47,7 +19,11 @@ const child = spawn(
     cwd: backendRoot,
     stdio: "inherit",
     shell: false,
-    env: { ...process.env, DATABASE_URL: direct },
+    env: {
+      ...process.env,
+      DATABASE_URL: database.directUrl,
+      DIRECT_DATABASE_URL: database.directUrl,
+    },
   },
 );
 child.once("error", (error) => {

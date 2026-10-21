@@ -22,6 +22,7 @@ import {
 } from "@/hooks/use-brutal-theme";
 import { ScreenTransition } from "@/components/ui/ScreenTransition";
 import { AppIcon } from "@/components/ui/AppIcon";
+import { unregisterNotifications } from "@/services/notifications";
 
 export default function App() {
   const colors = useBrutalTheme();
@@ -72,7 +73,11 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await api.logout();
+      try {
+        await unregisterNotifications();
+      } finally {
+        await api.logout();
+      }
       setSessionError("");
     } catch (error) {
       setSessionError(

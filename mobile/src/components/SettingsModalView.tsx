@@ -19,10 +19,10 @@ import {
 } from "@/hooks/use-brutal-theme";
 import type { WorkspaceSettings } from "@/types/chat";
 import { api } from "@/services/api";
-import { devAuthEnabled } from "@/services/developmentAuth";
 import { AppIcon } from "./ui/AppIcon";
 import { MotionPressable } from "./ui/MotionPressable";
 import { BrutalButton } from "./brutal/BrutalButton";
+import { enableNotifications } from "@/services/notifications";
 
 export function SettingsModalView({
   visible,
@@ -57,6 +57,29 @@ export function SettingsModalView({
         failure instanceof Error
           ? failure.message
           : "Your theme couldn't be saved.",
+      );
+    } finally {
+      pending.current = false;
+      setSaving(false);
+    }
+  };
+  const changeNotifications = async (
+    values: Partial<WorkspaceSettings>,
+    deviceOnly = false,
+  ) => {
+    if (pending.current) return;
+    pending.current = true;
+    setSaving(true);
+    setError("");
+    try {
+      if (values.notificationsEnabled || deviceOnly)
+        await enableNotifications();
+      if (!deviceOnly) await onUpdateSettings(values);
+    } catch (failure) {
+      setError(
+        failure instanceof Error
+          ? failure.message
+          : "Your notification settings couldn't be saved.",
       );
     } finally {
       pending.current = false;
@@ -123,6 +146,52 @@ export function SettingsModalView({
               {error}
             </Text>
           ) : null}
+          <Text style={styles.sectionTitle}>NOTIFICATIONS</Text>
+          <View style={styles.card}>
+            <View style={styles.row}>
+              <View style={styles.symbol}>
+                <AppIcon name="notifications" size={24} />
+              </View>
+              <View style={styles.rowBody}>
+                <Text style={styles.label}>Message and call alerts</Text>
+                <Text style={styles.detail}>Applies to your account</Text>
+              </View>
+              <Switch
+                accessibilityLabel="Message and call alerts"
+                value={settings.notificationsEnabled}
+                disabled={saving}
+                onValueChange={(value) =>
+                  void changeNotifications({ notificationsEnabled: value })
+                }
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+            <View style={styles.row}>
+              <View style={styles.rowBody}>
+                <Text style={styles.label}>Show message previews</Text>
+                <Text style={styles.detail}>
+                  Include sender and text in alerts
+                </Text>
+              </View>
+              <Switch
+                accessibilityLabel="Show message previews"
+                value={settings.notificationPreviews}
+                disabled={saving}
+                onValueChange={(value) =>
+                  void changeNotifications({ notificationPreviews: value })
+                }
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+            <BrutalButton
+              title="Enable on this phone"
+              variant="outline"
+              disabled={saving}
+              onPress={() => void changeNotifications({}, true)}
+            />
+          </View>
           <Text style={styles.sectionTitle}>GROUP ACCESS</Text>
           <MotionPressable
             accessibilityRole="button"
@@ -147,46 +216,44 @@ export function SettingsModalView({
             onPress={onLogout}
             icon={<AppIcon name="logout" size={21} color="#FFFFFF" />}
           />
-          {!devAuthEnabled && (
-            <BrutalButton
-              title="Sign out all devices"
-              variant="outline"
-              disabled={saving}
-              onPress={() =>
-                Alert.alert(
-                  "Sign out all devices?",
-                  "You’ll need to sign in again on every device.",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Sign out",
-                      style: "destructive",
-                      onPress: () => {
-                        if (pending.current) return;
-                        pending.current = true;
-                        setSaving(true);
-                        setError("");
-                        void api
-                          .logoutAllDevices()
-                          .then(onLogout)
-                          .catch((failure: unknown) =>
-                            setError(
-                              failure instanceof Error
-                                ? failure.message
-                                : "Couldn't sign out all devices.",
-                            ),
-                          )
-                          .finally(() => {
-                            pending.current = false;
-                            setSaving(false);
-                          });
-                      },
+          <BrutalButton
+            title="Sign out all devices"
+            variant="outline"
+            disabled={saving}
+            onPress={() =>
+              Alert.alert(
+                "Sign out all devices?",
+                "You’ll need to sign in again on every device.",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Sign out",
+                    style: "destructive",
+                    onPress: () => {
+                      if (pending.current) return;
+                      pending.current = true;
+                      setSaving(true);
+                      setError("");
+                      void api
+                        .logoutAllDevices()
+                        .then(onLogout)
+                        .catch((failure: unknown) =>
+                          setError(
+                            failure instanceof Error
+                              ? failure.message
+                              : "Couldn't sign out all devices.",
+                          ),
+                        )
+                        .finally(() => {
+                          pending.current = false;
+                          setSaving(false);
+                        });
                     },
-                  ],
-                )
-              }
-            />
-          )}
+                  },
+                ],
+              )
+            }
+          />
         </ScrollView>
       </SafeAreaView>
     </Modal>

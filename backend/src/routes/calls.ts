@@ -1,10 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import type { Prisma, Call } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { AuthRequest } from "../lib/auth.js";
 import { accessibleChannel, lockChannel } from "../lib/access.js";
 import { asyncRoute, HttpError, parse } from "../lib/http.js";
+import { emitUsers, lockEventOrder } from "../lib/events.js";
+import { callIce } from "../lib/ice.js";
 
 export const callsRouter = Router();
 const live = ["ringing", "active"];
@@ -17,37 +20,19 @@ const participantChannelScope = (
   members: { some: { userId: req.auth!.userId } },
 });
 const sdp = z.string().min(10).max(48000).startsWith("v=0");
-// No public STUN service is contacted by default. A LAN needs no provider.
-const iceSchema = z
-  .array(
-    z
-      .object({
-        urls: z.union([z.string(), z.array(z.string()).min(1).max(4)]),
-        username: z.string().optional(),
-        credential: z.string().optional(),
-      })
-      .strict(),
-  )
-  .max(8);
-const iceServers = parse(
-  iceSchema,
-  JSON.parse(process.env.WEBRTC_ICE_SERVERS || "[]"),
-);
-for (const server of iceServers) {
-  for (const url of [server.urls].flat()) {
-    if (!/^(stun|stuns|turn|turns):[^\s]+$/.test(url))
-      throw new Error("WEBRTC_ICE_SERVERS contains an invalid ICE URL");
-  }
-}
 function dto(call: Call) {
   return {
     id: call.id,
+    nativeId: call.nativeId,
     channelId: call.channelId,
     callerId: call.callerId,
     calleeId: call.calleeId,
     kind: call.kind,
     status: call.status,
     offer: call.offer,
+    offerHash: call.offer
+      ? createHash("sha256").update(call.offer).digest("hex")
+      : null,
     answer: call.answer,
     createdAt: call.createdAt.toISOString(),
   };
@@ -74,11 +59,14 @@ async function expire(tx: Prisma.TransactionClient, userId: string) {
     data: { status: "ended", offer: null, answer: null },
   });
 }
-callsRouter.get("/config", (_req, res) => res.json({ data: { iceServers } }));
+callsRouter.get("/config", (req: AuthRequest, res) =>
+  res.json({ data: callIce(req.auth!.userId) }),
+);
 callsRouter.get(
   "/incoming",
   asyncRoute(async (req: AuthRequest, res) => {
     const result = await prisma.$transaction(async (tx) => {
+      await lockEventOrder(tx);
       await expire(tx, req.auth!.userId);
       return tx.call.findFirst({
         where: {
@@ -101,6 +89,20 @@ callsRouter.get(
     });
   }),
 );
+callsRouter.get(
+  "/:id",
+  asyncRoute(async (req: AuthRequest, res) => {
+    const call = await prisma.call.findFirst({
+      where: {
+        id: req.params.id,
+        channel: participantChannelScope(req),
+        OR: [{ callerId: req.auth!.userId }, { calleeId: req.auth!.userId }],
+      },
+    });
+    if (!call) throw new HttpError(404, "Call not found");
+    res.json({ data: dto(call) });
+  }),
+);
 callsRouter.post(
   "/",
   asyncRoute(async (req: AuthRequest, res) => {
@@ -115,6 +117,7 @@ callsRouter.post(
       req.body,
     );
     const result = await prisma.$transaction(async (tx) => {
+      await lockEventOrder(tx);
       await lockChannel(tx, input.channelId);
       const channel = await accessibleChannel(req, input.channelId, tx);
       if (!channel.directKey)
@@ -150,7 +153,19 @@ callsRouter.post(
         })
       )
         throw new HttpError(409, "One of you is already in a call");
-      return tx.call.create({
+      if (
+        await tx.groupCallParticipant.findFirst({
+          where: {
+            userId: { in: userIds },
+            leftAt: null,
+            lastSeenAt: { gt: new Date(Date.now() - 45000) },
+            call: { endedAt: null },
+          },
+          select: { userId: true },
+        })
+      )
+        throw new HttpError(409, "One of you is already in a group call");
+      const call = await tx.call.create({
         data: {
           ...input,
           callerId: req.auth!.userId,
@@ -158,6 +173,15 @@ callsRouter.post(
           expiresAt: new Date(Date.now() + 60000),
         },
       });
+      await emitUsers(tx, userIds, {
+        type: "call.updated",
+        targetId: call.id,
+        channelId: channel.id,
+        workspaceId: channel.workspaceId,
+        notify: true,
+        excludePushUserId: req.auth!.userId,
+      });
+      return call;
     });
     res.status(201).json({ data: dto(result) });
   }),
@@ -168,8 +192,20 @@ callsRouter.post(
     const input = parse(
       z
         .object({
-          action: z.enum(["poll", "answer", "end", "decline"]),
+          action: z.enum([
+            "poll",
+            "answer",
+            "end",
+            "decline",
+            "restart",
+            "request-restart",
+          ]),
           answer: sdp.optional(),
+          offer: sdp.optional(),
+          offerHash: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/)
+            .optional(),
         })
         .strict(),
       req.body,
@@ -186,6 +222,7 @@ callsRouter.post(
     // Resolve the workspace from the authorized call rather than the open conversation.
     req.auth!.workspaceId = target.channel.workspaceId;
     const result = await prisma.$transaction(async (tx) => {
+      await lockEventOrder(tx);
       await lockChannel(tx, target.channelId);
       await accessibleChannel(req, target.channelId, tx);
       await expire(tx, req.auth!.userId);
@@ -200,15 +237,32 @@ callsRouter.post(
           userId: { in: [call.callerId, call.calleeId] },
         },
       });
-      if (members !== 2)
-        return tx.call.update({
+      if (members !== 2) {
+        const ended = await tx.call.update({
           where: { id: call.id },
           data: { status: "ended", offer: null, answer: null },
         });
+        await emitUsers(tx, [call.callerId, call.calleeId], {
+          type: "call.updated",
+          targetId: call.id,
+          channelId: call.channelId,
+          workspaceId: req.auth!.workspaceId,
+        });
+        return ended;
+      }
       if (input.action === "answer") {
         if (call.calleeId !== req.auth!.userId || !input.answer)
           throw new HttpError(403, "Only the recipient can answer a call");
-        if (call.status === "active") {
+        if (
+          !call.offer ||
+          input.offerHash !==
+            createHash("sha256").update(call.offer).digest("hex")
+        )
+          throw new HttpError(
+            409,
+            "Call setup changed; reconnect to the latest offer",
+          );
+        if (call.status === "active" && call.answer !== null) {
           if (call.answer !== input.answer)
             throw new HttpError(
               409,
@@ -216,7 +270,7 @@ callsRouter.post(
             );
           return call;
         }
-        return tx.call.update({
+        const accepted = await tx.call.update({
           where: { id: call.id },
           data: {
             status: "active",
@@ -225,10 +279,60 @@ callsRouter.post(
             expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
           },
         });
+        await emitUsers(tx, [call.callerId, call.calleeId], {
+          type: "call.updated",
+          targetId: call.id,
+          channelId: call.channelId,
+          workspaceId: req.auth!.workspaceId,
+        });
+        return accepted;
+      }
+      if (input.action === "restart" || input.action === "request-restart") {
+        if (call.status !== "active")
+          throw new HttpError(409, "Only an active call can reconnect");
+        if (
+          input.action === "restart" &&
+          (call.callerId !== req.auth!.userId || !input.offer)
+        )
+          throw new HttpError(403, "Only the caller can publish a new offer");
+        if (
+          input.action === "request-restart" &&
+          call.calleeId !== req.auth!.userId
+        )
+          throw new HttpError(
+            403,
+            "Only the recipient can request a reconnect",
+          );
+        if (
+          input.action === "restart" &&
+          (!call.offer ||
+            input.offerHash !==
+              createHash("sha256").update(call.offer).digest("hex"))
+        )
+          throw new HttpError(
+            409,
+            "Call setup changed; retry the latest connection",
+          );
+        const reconnecting = await tx.call.update({
+          where: { id: call.id },
+          data: {
+            ...(input.action === "restart"
+              ? { offer: input.offer, callerSeenAt: new Date() }
+              : { calleeSeenAt: new Date() }),
+            answer: null,
+          },
+        });
+        await emitUsers(tx, [call.callerId, call.calleeId], {
+          type: "call.updated",
+          targetId: call.id,
+          channelId: call.channelId,
+          workspaceId: req.auth!.workspaceId,
+        });
+        return reconnecting;
       }
       if (input.action === "decline" && call.calleeId !== req.auth!.userId)
         throw new HttpError(403, "Only the recipient can decline");
-      return tx.call.update({
+      const updated = await tx.call.update({
         where: { id: call.id },
         data:
           input.action === "poll"
@@ -241,6 +345,14 @@ callsRouter.post(
                 answer: null,
               },
       });
+      if (input.action !== "poll")
+        await emitUsers(tx, [call.callerId, call.calleeId], {
+          type: "call.updated",
+          targetId: call.id,
+          channelId: call.channelId,
+          workspaceId: req.auth!.workspaceId,
+        });
+      return updated;
     });
     res.json({ data: dto(result) });
   }),

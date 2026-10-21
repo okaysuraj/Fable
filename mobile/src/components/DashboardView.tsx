@@ -6,7 +6,13 @@ import {
   useBrutalStyles,
   type BrutalPalette,
 } from "@/hooks/use-brutal-theme";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   BackHandler,
@@ -25,6 +31,7 @@ import { BrutalThemeProvider } from "@/hooks/use-brutal-theme";
 import { api, ApiError } from "@/services/api";
 import { MobileChatView } from "./chat/MobileChatView";
 import { CallingProvider } from "./calling/CallingProvider";
+import { GroupCallingProvider } from "./calling/GroupCallingProvider";
 import { CallsView } from "./calling/CallsView";
 import { BottomTabs, type HomeTab } from "./BottomTabs";
 import { SidebarDrawer } from "./SidebarDrawer";
@@ -41,6 +48,12 @@ import { BrutalButton } from "./brutal/BrutalButton";
 import { WorkspaceManagerModal } from "./WorkspaceManagerModal";
 import { ProfileModal } from "./ProfileModal";
 import { MessageSearchModal } from "./MessageSearchModal";
+import { startRealtime } from "@/services/realtime";
+import {
+  startNotifications,
+  subscribeNotificationTap,
+  setNotificationConversation,
+} from "@/services/notifications";
 
 interface DashboardViewProps {
   currentUser: User;
@@ -86,7 +99,9 @@ const DashboardContent: React.FC<
   const [cameraDraft, setCameraDraft] = useState<PhotoDraft | null>(null);
   const [cameraBusy, setCameraBusy] = useState(false);
   const capturing = useRef(false);
-  const [callPresented, setCallPresented] = useState(false);
+  const [directCallPresented, setCallPresented] = useState(false);
+  const [groupCallPresented, setGroupCallPresented] = useState(false);
+  const callPresented = directCallPresented || groupCallPresented;
   const [directoryRevision, setDirectoryRevision] = useState(0);
   const { width } = useWindowDimensions();
   const wideLayout = width >= 840;
@@ -118,6 +133,8 @@ const DashboardContent: React.FC<
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMessageSearchOpen, setIsMessageSearchOpen] = useState(false);
   const [notice, setNotice] = useState("");
+  useEffect(() => startRealtime(), [currentUser.id]);
+  useEffect(() => startNotifications(setNotice), [currentUser.id]);
 
   const {
     activeChannel,
@@ -319,6 +336,36 @@ const DashboardContent: React.FC<
     setActiveTab("chats");
     closeDrawer();
   };
+  const openConversationRef = useRef(openConversation);
+  useLayoutEffect(() => {
+    openConversationRef.current = openConversation;
+  });
+  useEffect(() => {
+    if (loading) return;
+    return subscribeNotificationTap((destination) =>
+      openConversationRef.current(
+        destination.channelId,
+        destination.workspaceId,
+      ),
+    );
+  }, [loading]);
+  useEffect(() => {
+    setNotificationConversation(
+      !isDrawerOpen &&
+        activeTab === "chats" &&
+        !callPresented &&
+        !isNavigationOpen
+        ? activeChannelId
+        : null,
+    );
+    return () => setNotificationConversation(null);
+  }, [
+    activeChannelId,
+    isDrawerOpen,
+    activeTab,
+    callPresented,
+    isNavigationOpen,
+  ]);
   const conversationCreated = async (chat: import("@/types/chat").Channel) => {
     await api.selectWorkspace(chat.workspaceId);
     setIsCreateChatOpen(false);
@@ -363,310 +410,316 @@ const DashboardContent: React.FC<
     setIsDrawerOpen(true);
   };
   return (
-    <CallingProvider
-      key={api.getSelectedWorkspaceId()}
-      userId={currentUser.id}
-      onActiveChange={setCallPresented}
-    >
-      <NavigationDrawer
-        ref={navigationRef}
-        open={isNavigationOpen}
-        onOpenChange={setIsNavigationOpen}
-        enabled={
-          !callPresented &&
-          !isCreateChatOpen &&
-          !isNewGroupOpen &&
-          !cameraDraft &&
-          !cameraBusy &&
-          !isContextDrawerOpen &&
-          !isSettingsOpen &&
-          !isWorkspaceOpen &&
-          !isProfileOpen &&
-          !isMessageSearchOpen &&
-          !actionMessage
-        }
-        currentUser={currentUser}
-        canCreateChat={!loading && !loadError}
-        canOpenSettings={Boolean(settings)}
-        onCreateGroup={() => setIsNewGroupOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        onOpenProfile={() => setIsProfileOpen(true)}
-      >
-        <SafeAreaView style={styles.safeArea} edges={["top"]}>
-          <StatusBar
-            barStyle={
-              BrutalColors.bgPaper === "#FFFFFF"
-                ? "dark-content"
-                : "light-content"
-            }
-            backgroundColor={BrutalColors.bgPaper}
-          />
-          {notice ? (
-            <View style={styles.notice}>
-              <Text
-                accessibilityRole="alert"
-                style={{ flex: 1, color: BrutalColors.selectionInk }}
-              >
-                {notice}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Dismiss notification"
-                onPress={() => setNotice("")}
-                hitSlop={8}
-              >
-                <Text style={{ color: BrutalColors.selectionInk }}>Close</Text>
-              </Pressable>
-            </View>
-          ) : null}
-          <View style={styles.splitView}>
-            {showChatList && (
-              <View
-                style={
-                  wideChatLayout ? styles.chatListColumn : styles.phoneChatList
-                }
-              >
-                {activeTab === "calls" ? (
-                  <CallsView
-                    key={api.getSelectedWorkspaceId()}
-                    currentUserId={currentUser.id}
-                    onOpenNavigation={openNavigation}
-                    onManageGroups={() => setIsWorkspaceOpen(true)}
-                  />
-                ) : (
-                  <SidebarDrawer
-                    currentUserId={currentUser.id}
-                    key={api.getSelectedWorkspaceId() + ":" + directoryRevision}
-                    activeChannelId={activeChannelId}
-                    onSelectChannel={openConversation}
-                    showPeople={showPeople}
-                    onOpenNavigation={openNavigation}
-                    onCreateChat={() => setIsCreateChatOpen(true)}
-                    onOpenCamera={() => void openCamera()}
-                    cameraBusy={cameraBusy}
-                    canCreateChat={!loading && !loadError}
-                  />
-                )}
-                <BottomTabs activeTab={activeTab} onSelect={selectTab} />
-              </View>
-            )}
-            <View
-              style={[
-                styles.conversationColumn,
-                showChatList &&
-                  (activeTab !== "chats" || !wideLayout) && {
-                    display: "none",
-                  },
-              ]}
-            >
-              {loading ? (
-                <View style={styles.state}>
-                  <ActivityIndicator color={BrutalColors.ink} />
-                  <Text style={styles.title}>Loading your chats…</Text>
-                </View>
-              ) : loadError ? (
-                <View style={styles.state}>
-                  <Text accessibilityRole="alert" style={styles.title}>
-                    {loadError}
+    <CallingProvider userId={currentUser.id} onActiveChange={setCallPresented}>
+      <GroupCallingProvider onActiveChange={setGroupCallPresented}>
+        <NavigationDrawer
+          ref={navigationRef}
+          open={isNavigationOpen}
+          onOpenChange={setIsNavigationOpen}
+          enabled={
+            !callPresented &&
+            !isCreateChatOpen &&
+            !isNewGroupOpen &&
+            !cameraDraft &&
+            !cameraBusy &&
+            !isContextDrawerOpen &&
+            !isSettingsOpen &&
+            !isWorkspaceOpen &&
+            !isProfileOpen &&
+            !isMessageSearchOpen &&
+            !actionMessage
+          }
+          currentUser={currentUser}
+          canCreateChat={!loading && !loadError}
+          canOpenSettings={Boolean(settings)}
+          onCreateGroup={() => setIsNewGroupOpen(true)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenProfile={() => setIsProfileOpen(true)}
+        >
+          <SafeAreaView style={styles.safeArea} edges={["top"]}>
+            <StatusBar
+              barStyle={
+                BrutalColors.bgPaper === "#FFFFFF"
+                  ? "dark-content"
+                  : "light-content"
+              }
+              backgroundColor={BrutalColors.bgPaper}
+            />
+            {notice ? (
+              <View style={styles.notice}>
+                <Text
+                  accessibilityRole="alert"
+                  style={{ flex: 1, color: BrutalColors.selectionInk }}
+                >
+                  {notice}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Dismiss notification"
+                  onPress={() => setNotice("")}
+                  hitSlop={8}
+                >
+                  <Text style={{ color: BrutalColors.selectionInk }}>
+                    Close
                   </Text>
-                  <BrutalButton title="Try again" onPress={reload} />
-                  <BrutalButton
-                    title="Choose group"
-                    variant="outline"
-                    onPress={() => setIsWorkspaceOpen(true)}
-                  />
-                  <BrutalButton
-                    title="Log out"
-                    variant="outline"
-                    onPress={onLogout}
-                  />
+                </Pressable>
+              </View>
+            ) : null}
+            <View style={styles.splitView}>
+              {showChatList && (
+                <View
+                  style={
+                    wideChatLayout
+                      ? styles.chatListColumn
+                      : styles.phoneChatList
+                  }
+                >
+                  {activeTab === "calls" ? (
+                    <CallsView
+                      key={api.getSelectedWorkspaceId()}
+                      currentUserId={currentUser.id}
+                      onOpenNavigation={openNavigation}
+                      onManageGroups={() => setIsWorkspaceOpen(true)}
+                    />
+                  ) : (
+                    <SidebarDrawer
+                      currentUserId={currentUser.id}
+                      key={
+                        api.getSelectedWorkspaceId() + ":" + directoryRevision
+                      }
+                      activeChannelId={activeChannelId}
+                      onSelectChannel={openConversation}
+                      showPeople={showPeople}
+                      onOpenNavigation={openNavigation}
+                      onCreateChat={() => setIsCreateChatOpen(true)}
+                      onOpenCamera={() => void openCamera()}
+                      cameraBusy={cameraBusy}
+                      canCreateChat={!loading && !loadError}
+                    />
+                  )}
+                  <BottomTabs activeTab={activeTab} onSelect={selectTab} />
                 </View>
-              ) : activeChannel ? (
-                <View style={styles.container}>
-                  {messageError ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Retry loading messages"
+              )}
+              <View
+                style={[
+                  styles.conversationColumn,
+                  showChatList &&
+                    (activeTab !== "chats" || !wideLayout) && {
+                      display: "none",
+                    },
+                ]}
+              >
+                {loading ? (
+                  <View style={styles.state}>
+                    <ActivityIndicator color={BrutalColors.ink} />
+                    <Text style={styles.title}>Loading your chats…</Text>
+                  </View>
+                ) : loadError ? (
+                  <View style={styles.state}>
+                    <Text accessibilityRole="alert" style={styles.title}>
+                      {loadError}
+                    </Text>
+                    <BrutalButton title="Try again" onPress={reload} />
+                    <BrutalButton
+                      title="Choose group"
+                      variant="outline"
+                      onPress={() => setIsWorkspaceOpen(true)}
+                    />
+                    <BrutalButton
+                      title="Log out"
+                      variant="outline"
+                      onPress={onLogout}
+                    />
+                  </View>
+                ) : activeChannel ? (
+                  <View style={styles.container}>
+                    {messageError ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Retry loading messages"
+                        onPress={() => {
+                          void refreshMessages();
+                        }}
+                        style={styles.error}
+                      >
+                        <Text
+                          accessibilityRole="alert"
+                          style={{ color: BrutalColors.accentPink }}
+                        >
+                          {messageError} - Tap to retry
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                    <MobileChatView
+                      key={activeChannel.id}
+                      channel={activeChannel}
+                      currentUser={currentUser}
+                      hideBackButton={wideLayout}
+                      messages={messages}
+                      teamMembers={teamMembers}
+                      onSendMessage={handleSendMessage}
+                      onToggleReaction={handleToggleReaction}
+                      onEditMessage={handleEditMessage}
+                      onDeleteMessage={handleDeleteMessage}
+                      onPinMessage={handlePinMessage}
+                      pinnedMessages={pinnedMessages}
+                      actionMessage={actionMessage}
+                      onActionMessageChanged={setActionMessage}
+                      pinnedLoading={pinsLoading}
+                      onToggleDrawer={() => showDirectory(false)}
+                      onOpenNavigation={openNavigation}
+                      onOpenChatDetails={() => setIsContextDrawerOpen(true)}
+                      onOpenMessageSearch={() => setIsMessageSearchOpen(true)}
+                      highlightedMessageId={highlightedMessageId}
+                      loading={messagesLoading}
+                      archive={archive}
+                      pinsArchive={pinsArchive}
+                      pageRevision={pageRevision}
+                      pinPageRevision={pinPageRevision}
+                      hasOlder={Boolean(
+                        historyPage?.hasOlder ||
+                        (!archive && messages.length >= 100),
+                      )}
+                      hasNewer={Boolean(historyPage?.hasNewer)}
+                      hasOlderPins={Boolean(
+                        pinPage?.hasOlder ||
+                        (!pinsArchive && pinnedMessages.length >= 100),
+                      )}
+                      hasNewerPins={Boolean(pinPage?.hasNewer)}
+                      onNavigateHistory={(direction, pinned) => {
+                        void navigateHistory(direction, pinned);
+                      }}
+                      onPinnedViewChanged={setPinnedView}
+                    />
+                  </View>
+                ) : activeChannelId ? (
+                  <View style={styles.state}>
+                    <ActivityIndicator color={BrutalColors.ink} />
+                    <Text style={{ color: BrutalColors.ink }}>
+                      Loading chat…
+                    </Text>
+                    {messageError ? (
+                      <Text
+                        accessibilityRole="alert"
+                        style={{ color: BrutalColors.ink }}
+                      >
+                        {messageError}
+                      </Text>
+                    ) : null}
+                    <BrutalButton
+                      title="Try again"
                       onPress={() => {
                         void refreshMessages();
                       }}
-                      style={styles.error}
-                    >
-                      <Text
-                        accessibilityRole="alert"
-                        style={{ color: BrutalColors.accentPink }}
-                      >
-                        {messageError} - Tap to retry
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                  <MobileChatView
-                    key={activeChannel.id}
-                    channel={activeChannel}
-                    currentUser={currentUser}
-                    hideBackButton={wideLayout}
-                    messages={messages}
-                    teamMembers={teamMembers}
-                    onSendMessage={handleSendMessage}
-                    onToggleReaction={handleToggleReaction}
-                    onEditMessage={handleEditMessage}
-                    onDeleteMessage={handleDeleteMessage}
-                    onPinMessage={handlePinMessage}
-                    pinnedMessages={pinnedMessages}
-                    actionMessage={actionMessage}
-                    onActionMessageChanged={setActionMessage}
-                    pinnedLoading={pinsLoading}
-                    onToggleDrawer={() => showDirectory(false)}
-                    onOpenNavigation={openNavigation}
-                    onOpenChatDetails={() => setIsContextDrawerOpen(true)}
-                    onOpenMessageSearch={() => setIsMessageSearchOpen(true)}
-                    highlightedMessageId={highlightedMessageId}
-                    loading={messagesLoading}
-                    archive={archive}
-                    pinsArchive={pinsArchive}
-                    pageRevision={pageRevision}
-                    pinPageRevision={pinPageRevision}
-                    hasOlder={Boolean(
-                      historyPage?.hasOlder ||
-                      (!archive && messages.length >= 100),
-                    )}
-                    hasNewer={Boolean(historyPage?.hasNewer)}
-                    hasOlderPins={Boolean(
-                      pinPage?.hasOlder ||
-                      (!pinsArchive && pinnedMessages.length >= 100),
-                    )}
-                    hasNewerPins={Boolean(pinPage?.hasNewer)}
-                    onNavigateHistory={(direction, pinned) => {
-                      void navigateHistory(direction, pinned);
-                    }}
-                    onPinnedViewChanged={setPinnedView}
-                  />
-                </View>
-              ) : activeChannelId ? (
-                <View style={styles.state}>
-                  <ActivityIndicator color={BrutalColors.ink} />
-                  <Text style={{ color: BrutalColors.ink }}>Loading chat…</Text>
-                  {messageError ? (
-                    <Text
-                      accessibilityRole="alert"
-                      style={{ color: BrutalColors.ink }}
-                    >
-                      {messageError}
+                    />
+                  </View>
+                ) : (
+                  <View style={styles.state}>
+                    <Text style={styles.title}>No chats yet</Text>
+                    <Text style={{ color: BrutalColors.ink }}>
+                      Choose New chat to start a conversation.
                     </Text>
-                  ) : null}
-                  <BrutalButton
-                    title="Try again"
-                    onPress={() => {
-                      void refreshMessages();
-                    }}
-                  />
-                </View>
-              ) : (
-                <View style={styles.state}>
-                  <Text style={styles.title}>No chats yet</Text>
-                  <Text style={{ color: BrutalColors.ink }}>
-                    Choose New chat to start a conversation.
-                  </Text>
-                  <BrutalButton
-                    title="Manage group"
-                    onPress={() => setIsWorkspaceOpen(true)}
-                  />
-                  <BrutalButton title="Refresh" onPress={reload} />
-                  <BrutalButton
-                    title="Log out"
-                    variant="outline"
-                    onPress={onLogout}
-                  />
-                </View>
-              )}
+                    <BrutalButton
+                      title="New chat"
+                      onPress={() => setIsCreateChatOpen(true)}
+                    />
+                    <BrutalButton title="Refresh" onPress={reload} />
+                    <BrutalButton
+                      title="Log out"
+                      variant="outline"
+                      onPress={onLogout}
+                    />
+                  </View>
+                )}
+              </View>
             </View>
-          </View>
-          {(isCreateChatOpen || cameraDraft) && (
-            <ContactPickerModal
-              currentUser={currentUser}
-              photo={cameraDraft ?? undefined}
-              onClose={() => {
-                setIsCreateChatOpen(false);
-                setCameraDraft(null);
-              }}
-              onCreated={conversationCreated}
-            />
-          )}
-          {isNewGroupOpen && (
-            <NewGroupModal
-              currentUser={currentUser}
-              onClose={() => setIsNewGroupOpen(false)}
-              onCreated={conversationCreated}
-            />
-          )}
-          {isContextDrawerOpen && activeChannel && (
-            <ContextDrawerModal
-              key={activeChannel.id}
-              visible
-              onClose={() => setIsContextDrawerOpen(false)}
-              channel={activeChannel}
-              teamMembers={teamMembers}
-              currentUser={currentUser}
-              onMembershipChanged={membershipChanged}
-            />
-          )}
-          {isSettingsOpen && settings && (
-            <SettingsModalView
-              visible
-              onClose={() => setIsSettingsOpen(false)}
-              settings={settings}
-              onLogout={onLogout}
-              onManageGroups={() => {
-                setIsSettingsOpen(false);
-                setIsWorkspaceOpen(true);
-              }}
-              onUpdateSettings={async (values) => {
-                const saved = await api.updateSettings(values);
-                setSettings(saved);
-                onThemeLoaded(saved.theme);
-              }}
-            />
-          )}
-          {isWorkspaceOpen && (
-            <WorkspaceManagerModal
-              currentUser={currentUser}
-              onClose={() => setIsWorkspaceOpen(false)}
-              onChanged={(channelId) => {
-                setDirectoryRevision((value) => value + 1);
-                selectChannel(channelId || "");
-                if (channelId) {
+            {(isCreateChatOpen || cameraDraft) && (
+              <ContactPickerModal
+                currentUser={currentUser}
+                photo={cameraDraft ?? undefined}
+                onClose={() => {
+                  setIsCreateChatOpen(false);
+                  setCameraDraft(null);
+                }}
+                onCreated={conversationCreated}
+              />
+            )}
+            {isNewGroupOpen && (
+              <NewGroupModal
+                currentUser={currentUser}
+                onClose={() => setIsNewGroupOpen(false)}
+                onCreated={conversationCreated}
+              />
+            )}
+            {isContextDrawerOpen && activeChannel && (
+              <ContextDrawerModal
+                key={activeChannel.id}
+                visible
+                onClose={() => setIsContextDrawerOpen(false)}
+                channel={activeChannel}
+                teamMembers={teamMembers}
+                currentUser={currentUser}
+                onMembershipChanged={membershipChanged}
+              />
+            )}
+            {isSettingsOpen && settings && (
+              <SettingsModalView
+                visible
+                onClose={() => setIsSettingsOpen(false)}
+                settings={settings}
+                onLogout={onLogout}
+                onManageGroups={() => {
+                  setIsSettingsOpen(false);
+                  setIsWorkspaceOpen(true);
+                }}
+                onUpdateSettings={async (values) => {
+                  const saved = await api.updateSettings(values);
+                  setSettings(saved);
+                  onThemeLoaded(saved.theme);
+                }}
+              />
+            )}
+            {isWorkspaceOpen && (
+              <WorkspaceManagerModal
+                currentUser={currentUser}
+                onClose={() => setIsWorkspaceOpen(false)}
+                onChanged={(channelId) => {
+                  setDirectoryRevision((value) => value + 1);
+                  selectChannel(channelId || "");
+                  if (channelId) {
+                    setActiveTab("chats");
+                    closeDrawer();
+                  }
+                  reload();
+                }}
+              />
+            )}
+            {isProfileOpen && (
+              <ProfileModal
+                user={currentUser}
+                onClose={() => setIsProfileOpen(false)}
+                onSave={saveProfile}
+                onPhotoUpdated={(saved) => {
+                  onProfileUpdated(saved);
+                  updateChatProfile(saved);
+                }}
+              />
+            )}
+            {isMessageSearchOpen && activeChannel && (
+              <MessageSearchModal
+                channelId={activeChannel.id}
+                channelName={activeChannel.name}
+                onClose={() => setIsMessageSearchOpen(false)}
+                onSelectMessage={(channelId, messageId) => {
+                  openSearchMessage(channelId, messageId);
                   setActiveTab("chats");
                   closeDrawer();
-                }
-                reload();
-              }}
-            />
-          )}
-          {isProfileOpen && (
-            <ProfileModal
-              user={currentUser}
-              onClose={() => setIsProfileOpen(false)}
-              onSave={saveProfile}
-              onPhotoUpdated={(saved) => {
-                onProfileUpdated(saved);
-                updateChatProfile(saved);
-              }}
-            />
-          )}
-          {isMessageSearchOpen && activeChannel && (
-            <MessageSearchModal
-              channelId={activeChannel.id}
-              channelName={activeChannel.name}
-              onClose={() => setIsMessageSearchOpen(false)}
-              onSelectMessage={(channelId, messageId) => {
-                openSearchMessage(channelId, messageId);
-                setActiveTab("chats");
-                closeDrawer();
-              }}
-            />
-          )}
-        </SafeAreaView>
-      </NavigationDrawer>
+                }}
+              />
+            )}
+          </SafeAreaView>
+        </NavigationDrawer>
+      </GroupCallingProvider>
     </CallingProvider>
   );
 };

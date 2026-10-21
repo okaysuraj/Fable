@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { prisma } from "../lib/prisma.js";
+import { prisma, sqlTable } from "../lib/prisma.js";
 import { AuthRequest } from "../lib/auth.js";
 import { accessibleChannel, lockChannel } from "../lib/access.js";
 import { asyncRoute, parse } from "../lib/http.js";
@@ -64,8 +64,8 @@ conversationPresenceRouter.get(
         });
         const counts = message
           ? await tx.$queryRaw<{ readCount: number }[]>(Prisma.sql`
-      SELECT count(*)::int AS "readCount" FROM "ChannelMember" cm
-      JOIN "WorkspaceMember" wm ON wm."userId" = cm."userId" AND wm."workspaceId" = ${channel.workspaceId}
+      SELECT count(*)::int AS "readCount" FROM ${sqlTable("ChannelMember")} cm
+      JOIN ${sqlTable("WorkspaceMember")} wm ON wm."userId" = cm."userId" AND wm."workspaceId" = ${channel.workspaceId}
       WHERE cm."channelId" = ${channel.id} AND cm."userId" <> ${req.auth!.userId}
       AND cm."lastReadMessageId" IS NOT NULL
       AND (cm."lastReadAt" > ${message.createdAt} OR (cm."lastReadAt" = ${message.createdAt} AND cm."lastReadMessageId" >= ${message.id}))
